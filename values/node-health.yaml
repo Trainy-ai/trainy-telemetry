@@ -1,0 +1,222 @@
+## trainy-remediation — GPU node health checks and repair.
+##
+## Chart: oci://ghcr.io/trainy-ai/charts/trainy-remediation
+##
+## The NPD DaemonSet runs GPU, RDMA, PCIe, NVMe, kernel and network checks on
+## your GPU nodes and publishes each result as a `trainy.ai/<Check>`
+## NodeCondition. kube-state-metrics turns those conditions into
+## `kube_node_status_condition` series, which the VMAgent ships to Trainy — that
+## is how a bad GPU becomes an alert.
+##
+## The controller acts on those conditions by default — cordon, hand off to the
+## provider for repair, validate, return to service. That is the chart's own
+## default (`controller.enabled: true`) and this file does not override it, so a
+## hand-install from this values file alone gets a working remediation pipeline.
+##
+## install.sh layers the node pool and drain policy on top from your config, and
+## NODE_HEALTH_MODE=detect there turns the controller off for a phased rollout —
+## conditions still published and alertable, nothing acted on.
+##
+## This file holds the settings that are the same either way. Anything specific
+## to your hardware (RDMA device list, expected port count, GPUs per node) comes
+## from trainy-telemetry.conf.
+##
+##   helm upgrade --install trainy-remediation \
+##       oci://ghcr.io/trainy-ai/charts/trainy-remediation \
+##       --namespace trainy-system --create-namespace \
+##       --values values/node-health.yaml
+
+## Active checks are operator-driven probes — GPU burn, NCCL pair tests, fio,
+## iperf3 — that claim whole GPUs for minutes at a time and are triggered by
+## hand or on a schedule. A telemetry install has no use for them, and leaving
+## the machinery enabled means a PriorityClass and controller paths that exist
+## for something you are not running. Every individual check is off by default
+## anyway; this turns off the subsystem.
+activeChecks:
+  enabled: false
+
+## No batch-scheduler integration: this install does not assume JobSet or Kueue
+## CRDs exist, and skips the admission webhook (and its certificate) they would
+## need.
+enableBatch: false
+
+npd:
+  enabled: true
+
+  ## Checks beyond the chart defaults. Each one publishes its own NodeCondition;
+  ## whether that condition can act on a node is a separate decision, made in
+  ## the `remediation.conditions` map at the bottom of this file.
+  checks:
+    ## InfiniBand/RoCE port state — link down, degraded rate, wrong width.
+    ibPortState:
+      enabled: true
+    ## Physical-layer link quality from mlxlink: effective BER, module temp,
+    ## symbol errors. Catches a fabric degrading before it fails outright.
+    mlxlinkPhy:
+      enabled: true
+    ## GID table layout. A link flap can leave the expected GID index empty with
+    ## the real address one slot further along, which breaks any job pinned to a
+    ## fixed GID index — on that one device, on that one node.
+    rdmaGidLayout:
+      enabled: true
+    ## RoCE MTU consistency across devices.
+    roceMtu:
+      enabled: true
+    ## DNS resolution from inside a pod's network namespace, not the node's.
+    ## These fail differently, and the pod-side failure is the one that breaks
+    ## multi-node rendezvous.
+    podNetworkDns:
+      enabled: true
+      namespace: kube-system
+    ## Outbound HTTPS reachability. Catches a NAT or egress path failing for a
+    ## subset of nodes, which otherwise shows up as unexplained image-pull and
+    ## checkpoint-upload failures.
+    egressHttps:
+      enabled: true
+
+  ## Per-node exporters that ship alongside the checks.
+  roceExporter:
+    enabled: true
+    ## Reliability counters (retransmits, sequence errors) — the numbers that
+    ## distinguish "the fabric is slow" from "the fabric is dropping".
+    reliabilityCounters: true
+    extraCounters:
+      - roce_adp_retrans
+  mlxlinkExporter:
+    enabled: true
+    nodeSelector:
+      ## The chart defaults to nodes labelled for MFT tooling. Null it so the
+      ## exporter runs on every GPU node; Helm merges maps, so this key must be
+      ## explicitly nulled rather than omitted.
+      trainy.ai/mft: null
+
+  metrics:
+    enabled: true
+    port: 20257
+
+## Emit ServiceMonitors. The VictoriaMetrics operator converts them into its own
+## scrape objects and the VMAgent picks them up, so node-health metrics reach
+## Trainy without a hand-written scrape config.
+##
+## This requires the prometheus-operator CRDs (ServiceMonitor), which your
+## monitoring stack supplies. If your cluster has no such CRDs, set this false —
+## the chart still creates a plain Service on the metrics ports, and node
+## conditions still reach Trainy through kube-state-metrics either way.
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+## Off unless you run the konduktor Grafana provisioning sidecar.
+grafanaAlerts:
+  enabled: false
+
+## Cross-checks DCGM's XID counters as a second XID signal. Off: the primary
+## signal reads the kernel ring buffer directly and does not depend on DCGM or
+## on a Prometheus the controller can query.
+dcgmXidSignal:
+  enabled: false
+
+## Namespaces the controller will not evict from when draining a node.
+skipNamespaces:
+  - kube-system
+  - kube-public
+  - kube-node-lease
+  - gpu-operator
+
+remediation:
+  ## Provider: the cluster's hardware provider performs the physical repair
+  ## (reboot, RMA) and the controller drives the state machine around it —
+  ## cordon, wait, validate, return to service. Use InCluster only where Trainy
+  ## has the ability to reboot nodes directly.
+  mode: Provider
+
+  validation:
+    ## After a repair, run a NCCL all-reduce before returning the node to
+    ## service. A node that cannot complete a collective is not repaired,
+    ## whatever its conditions say.
+    nccl:
+      enabled: true
+    ## GPU burn-in is off: it takes minutes per node and duplicates what the
+    ## NCCL run already exercises on a return-to-service path.
+    burn:
+      enabled: false
+
+  ############################################################################
+  ## WHICH CONDITIONS MAY ACT ON A NODE.
+  ##
+  ## `taint: true` means this condition can cordon the node and start the
+  ## remediation pipeline. `taint: false` means it is published, alerted and
+  ## graphed, but never touches scheduling.
+  ##
+  ## This is the single most consequential map in the file, and the split is
+  ## deliberate: hard faults that make a node unfit for work can cordon it;
+  ## signals that are diagnostic, noisy, or fleet-wide rather than node-local
+  ## report only. A condition being enabled above says the check RUNS; taint
+  ## here says what it is ALLOWED TO DO.
+  ##
+  ## In detect mode none of this applies — nothing is cordoned at all.
+  ############################################################################
+  conditions:
+    ## Hard GPU faults — the node cannot do useful work.
+    GpuXid:        {taint: true}
+    GpuEcc:        {taint: true}
+    GpuCount:      {taint: true}
+    GpuBus:        {taint: true}
+    GpuPcie:       {taint: true}
+    GpuFabricMgr:  {taint: true}
+    GpuRowRemap:   {taint: true}
+    DcgmHealth:    {taint: true}
+    NvlinkSpeed:   {taint: true}
+
+    ## Thermal. GpuRawTemp additionally force-drains after an hour: a GPU still
+    ## running hot an hour in is being held there by the workload on it, so
+    ## evicting that workload IS the repair.
+    GpuRawTemp:
+      taint: true
+      drain: true
+      holdFor: 1h
+    GpuPowerBrake: {taint: true}
+
+    ## Fabric and NIC faults that break collectives.
+    RdmaLink:         {taint: true}
+    RdmaLinkFlapping: {taint: true}
+    RdmaGidLayout:    {taint: true}
+    Mlx5PortModule:   {taint: true}
+    Mlx5PciPower:     {taint: true}
+
+    ## Host-level faults.
+    ##
+    ## EgressHttps cordons here, overriding the chart's report-only default.
+    ## That is deliberate and matches the reference cluster this profile was
+    ## built from: a node that cannot reach anything over HTTPS cannot pull
+    ## images or write checkpoints, so keeping work off it is worth the cost.
+    ## Know the trade-off, because the chart's default exists for a reason: an
+    ## egress failure is usually an upstream fault shared by many nodes, and a
+    ## provider routing bug once took 87 GPU nodes dark at once — cordoning on
+    ## that quarantines the fleet over somebody else's problem. Watch the first
+    ## time it fires, and drop this line if it fires wide rather than per-node.
+    EgressHttps: {taint: true}
+    ##
+    ## NfsHealth is NOT listed, so it keeps the chart's report-only default. A
+    ## hung NFS server hits every node that mounts it at once, and the root
+    ## cause is on the server, so cordoning clients repairs nothing. It still
+    ## publishes, still alerts, and still blocks promotion out of standby.
+
+    ## Report-only. These are real signals worth alerting on, but cordoning on
+    ## them costs more capacity than it saves: some are cluster-wide when they
+    ## fire (DNS, egress DNS), some are slow-moving diagnostics rather than
+    ## faults (BER, module temperature, AER), and some are configuration rather
+    ## than failure (MTU, GID layout on a healthy link).
+    DnsResolution:    {taint: false}
+    NvmeRaidMount:    {taint: false}
+    PcieAer:          {taint: false}
+    RoceMtu:          {taint: false}
+    RdmaEffectiveBer: {taint: false}
+    RdmaModuleTemp:   {taint: false}
+    Mlx5AccessReg:    {taint: false}
+
+    ## No AMD (trainy.ai/amd-*) entries here. This profile targets NVIDIA
+    ## fabrics; the chart carries its own AMD condition policy, and a
+    ## half-specified one here would silently override it. If you run AMD GPUs,
+    ## talk to Trainy before enabling npd.amd — the node selector, the check set
+    ## and the condition policy all change together.

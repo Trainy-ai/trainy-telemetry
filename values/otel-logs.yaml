@@ -1,0 +1,237 @@
+## OpenTelemetry Collector — pod-log shipper (DaemonSet).
+##
+## Chart: open-telemetry/opentelemetry-collector 0.131.0
+##   helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+##
+## Ships logs from INFRASTRUCTURE namespaces only — default deny. Your
+## application namespaces are excluded because they are not on the allowlist,
+## not because a filter blocked them: a namespace you create tomorrow is
+## excluded automatically.
+##
+## This is a standalone release. If you already run an OpenTelemetry collector,
+## this one runs beside it and changes nothing about it — no logs are routed
+## through your collector and none of its configuration is touched.
+##
+## Installed by install.sh, which regenerates the namespace allowlist below from
+## LOG_NAMESPACES in trainy-telemetry.conf. To install by hand, edit BOTH lists
+## in this file (see the two TODO-ALLOWLIST markers) and run:
+##
+##   helm upgrade --install otel-central open-telemetry/opentelemetry-collector \
+##       --namespace otel-collector --create-namespace \
+##       --version 0.131.0 \
+##       --values values/otel-logs.yaml \
+##       --set-string 'config.processors.resource/customer.attributes[0].value=<your-id>'
+##
+## --set-string, not --set: Helm would type-coerce a numeric-looking identifier,
+## and the OTel resource processor requires a string.
+
+mode: daemonset
+
+## Distinct release name so this DaemonSet's resources never collide with any
+## other collector release in the same namespace.
+fullnameOverride: otel-central
+
+image:
+  repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s
+
+presets:
+  logsCollection:
+    enabled: true
+    ## Checkpoints record read offsets on a hostPath (/var/lib/otelcol) so a pod
+    ## restart resumes exactly where it stopped, instead of silently dropping
+    ## everything written while it was down.
+    ##
+    ## The trade-off to know about: this mounts a hostPath on every node, and a
+    ## node whose disk is full cannot create it — that pod never starts and
+    ## ships nothing, which is worse than the restart gap, and a full-disk node
+    ## is exactly the node whose logs you want. Set false to drop the mount and
+    ## accept the gap instead.
+    storeCheckpoints: true
+  kubernetesAttributes:
+    enabled: true
+    extractAllPodLabels: true
+    extractAllPodAnnotations: false
+  kubeletMetrics:
+    enabled: false
+
+config:
+  ############################################################################
+  ## NAMESPACE ALLOWLIST — DEFAULT DENY.
+  ##
+  ## Only the namespaces named below have logs shipped. Enforced in two
+  ## independent places, and BOTH must list a namespace for its logs to ship:
+  ##
+  ##   [1] the filelog `include` globs        (TODO-ALLOWLIST-LOGS-1)
+  ##   [2] the filter/trainy_namespaces regex (TODO-ALLOWLIST-LOGS-2)
+  ##
+  ## [1] is the real guarantee: a file that is not matched is never opened, so
+  ## those bytes never enter the process. [2] is the backstop, and it fails
+  ## CLOSED — a record whose namespace cannot be resolved is dropped.
+  ##
+  ## Adding to only [1] leaks nothing ([2] drops it). Adding to only [2]
+  ## collects nothing ([1] never reads it). install.sh regenerates both from one
+  ## list so they cannot drift.
+  ############################################################################
+  receivers:
+    ## Prune the chart's default receivers: this collector only tails files and
+    ## has no reason to open a listening socket. Pruning here is necessary but
+    ## NOT sufficient — see `ports:` at the bottom, which is what actually stops
+    ## the DaemonSet from claiming host ports another collector may hold.
+    jaeger: null
+    zipkin: null
+    otlp: null
+    prometheus: null
+
+    filelog:
+      ## Preserve each record's byte offset so logs sharing a container
+      ## timestamp can still be sorted in their original order.
+      include_file_record_offset: true
+
+      ## ===== TODO-ALLOWLIST-LOGS-1 : namespace list (globs) =====
+      ## One glob per allowed namespace. Pod logs live at
+      ## /var/log/pods/<namespace>_<pod>_<uid>/<container>/*.log, so the first
+      ## path segment is the namespace. Anything unlisted is never opened.
+      ## Keep in sync with TODO-ALLOWLIST-LOGS-2 below.
+      ##
+      ## This replaces the preset's collect-everything glob (Helm replaces lists
+      ## rather than appending them). The preset's self-exclude still applies,
+      ## so this collector does not tail its own logs.
+      ##
+      ## A glob for a namespace that does not exist is harmless — it matches
+      ## nothing.
+      include:
+        - /var/log/pods/prometheus_*/*/*.log
+        ## Some clusters run a second monitoring stack in `monitoring`
+        ## alongside one in `prometheus`. Collect both.
+        - /var/log/pods/monitoring_*/*/*.log
+        - /var/log/pods/vm-operator_*/*/*.log
+        - /var/log/pods/victoria-logs_*/*/*.log
+        - /var/log/pods/otel-collector_*/*/*.log
+        - /var/log/pods/gpu-operator_*/*/*.log
+        - /var/log/pods/dmesg-logging_*/*/*.log
+        - /var/log/pods/kube-system_*/*/*.log
+        - /var/log/pods/mpi-operator_*/*/*.log
+        - /var/log/pods/teleport_*/*/*.log
+        - /var/log/pods/local-path-storage_*/*/*.log
+        - /var/log/pods/network-operator_*/*/*.log
+        ## Where the node-health checks log. The main thing we want.
+        - /var/log/pods/trainy-system_*/*/*.log
+        - /var/log/pods/kueue-system_*/*/*.log
+        - /var/log/pods/jobset-system_*/*/*.log
+        - /var/log/pods/trainy-controller-system_*/*/*.log
+
+  processors:
+    filter/trainy_namespaces:
+      ## ===== TODO-ALLOWLIST-LOGS-2 : the same namespace list (regex) =====
+      ## Any condition that MATCHES causes the record to be DROPPED.
+      error_mode: ignore
+      logs:
+        log_record:
+          ## Fail closed: unresolved namespace means drop, never ship
+          ## unattributed.
+          - 'resource.attributes["k8s.namespace.name"] == nil'
+          ## Drop anything not on the allowlist above.
+          - >-
+            not IsMatch(resource.attributes["k8s.namespace.name"],
+            "^(prometheus|monitoring|vm-operator|victoria-logs|otel-collector|gpu-operator|dmesg-logging|kube-system|mpi-operator|teleport|local-path-storage|network-operator|trainy-system|kueue-system|jobset-system|trainy-controller-system)$")
+
+    ## Stamps your Trainy-assigned identifier on every record, mirroring
+    ## externalLabels.customer on the metrics side so logs and metrics filter
+    ## the same way. "CHANGEME" is a deliberate tripwire: forget to set it and
+    ## records arrive labelled CHANGEME rather than silently merging into
+    ## another cluster's data.
+    resource/customer:
+      attributes:
+        - key: customer
+          value: "CHANGEME"
+          action: upsert
+
+    ## `batch` and `memory_limiter` are intentionally not redefined: the chart
+    ## supplies both with sane defaults, and both are referenced in the pipeline
+    ## below.
+
+    k8sattributes:
+      extract:
+        metadata:
+          - "k8s.namespace.name"
+          - "k8s.deployment.name"
+          - "k8s.statefulset.name"
+          - "k8s.daemonset.name"
+          - "k8s.cronjob.name"
+          - "k8s.job.name"
+          - "k8s.node.name"
+          - "k8s.pod.name"
+          - "k8s.pod.uid"
+          - "k8s.pod.start_time"
+          - "k8s.cluster.uid"
+        annotations:
+          ## Every annotation whose key does not start with `gke.io.` — GKE
+          ## injects cluster-wide annotations onto every pod that would bloat
+          ## every record. `$$1` is the back-reference ($1) with the Helm `$`
+          ## escape.
+          - tag_name: $$1
+            key_regex: '^((?:[^g]|g[^k]|gk[^e]|gke[^.]|gke\.[^i]|gke\.i[^o])*)$'
+            from: pod
+
+  exporters:
+    otlphttp/central:
+      ## `logs_endpoint` (not `endpoint`) pins the exact path — `endpoint` would
+      ## append /v1/logs and produce a doubled suffix.
+      ##
+      ## No credentials by design: access to this endpoint is controlled at the
+      ## network layer, so Trainy must allowlist your cluster's egress IP.
+      ## install.sh overrides this from LOGS_ENDPOINT in trainy-telemetry.conf.
+      logs_endpoint: https://o11y-ingest.konduktor.trainy.us/insert/opentelemetry/v1/logs
+
+  service:
+    pipelines:
+      ## Logs only. Metrics take the VMAgent path, not this one.
+      metrics: null
+      traces: null
+      logs:
+        receivers: [filelog]
+        ## Order matters: k8sattributes must resolve k8s.namespace.name BEFORE
+        ## filter/trainy_namespaces reads it, or the filter fails closed and
+        ## drops everything.
+        processors: [memory_limiter, k8sattributes, resource/customer, filter/trainy_namespaces, batch]
+        exporters: [otlphttp/central]
+
+## Host ports are rendered from `ports.*.enabled`, NOT from the pipeline's
+## receivers — so pruning the receivers above does not stop them being claimed.
+## If you already run a collector DaemonSet holding 4317/4318/6831/9411/14250/
+## 14268 on every node, leaving these enabled puts every pod of this DaemonSet
+## in Pending forever with a host-port conflict.
+ports:
+  otlp:
+    enabled: false
+  otlp-http:
+    enabled: false
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+
+## Land on GPU nodes and on nodes carrying the usual cluster taints. Add your
+## own taints here if your GPU nodes carry something else — a node this
+## DaemonSet cannot schedule on ships no logs at all.
+tolerations:
+  - key: "nvidia.com/gpu"
+    operator: "Equal"
+    value: "present"
+    effect: "NoSchedule"
+  - key: "amd.com/gpu"
+    operator: "Equal"
+    value: "present"
+    effect: "NoSchedule"
+  - key: "trainy.konduktor.ai/faulty"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+  - key: "cloud.google.com/gke-queued"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"

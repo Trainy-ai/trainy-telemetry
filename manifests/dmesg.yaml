@@ -1,0 +1,91 @@
+## dmesg — kernel log capture, one pod per node.
+##
+## A plain manifest, not a Helm release. Each pod runs `dmesg -w` and writes the
+## kernel ring buffer to stdout, where the log shipper picks it up like any
+## other pod log and forwards it to Trainy.
+##
+## WHY THIS EXISTS: the kernel is where hardware failure shows up first and in
+## the most detail — Xid faults, PCIe AER corrections, mlx5 link events, NVMe
+## timeouts, OOM kills, soft lockups. None of that appears in any application
+## log, and by the time it shows up as a Kubernetes symptom the useful detail is
+## an hour old. This is the single highest-value log stream on a GPU node.
+##
+## It is NOT what drives node health remediation — the health checks read
+## /dev/kmsg directly and set NodeConditions from it, independently of this
+## DaemonSet. This is for the humans reading back through an incident.
+##
+## SECURITY NOTE, expect to be asked about this one: the container is
+## `privileged`, because reading the kernel ring buffer requires it. It runs one
+## command, `dmesg -w`, and does nothing else — no host filesystem mounts, no
+## network listeners, no writes. It lives in its own namespace so a pod-security
+## exception for it can be scoped to that namespace alone rather than granted
+## anywhere Trainy components run.
+##
+## install.sh fills in the placeholders and applies this with kubectl. By hand,
+## replace them and:
+##   kubectl apply -f manifests/dmesg.yaml
+##
+## Placeholders (each a NAME wrapped in double underscores):
+##   __NAMESPACE__  namespace to create and run in (default: dmesg-logging)
+##   __IMAGE__      container image
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: __NAMESPACE__
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dmesg
+  namespace: __NAMESPACE__
+  labels:
+    k8s-app: dmesg-logging
+spec:
+  selector:
+    matchLabels:
+      name: dmesg
+  template:
+    metadata:
+      labels:
+        name: dmesg
+    spec:
+      ## Runs on EVERY node, including control-plane and GPU nodes. A node you
+      ## cannot get kernel logs from is a node you cannot debug.
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Equal"
+          value: "present"
+          effect: "NoSchedule"
+        - key: "amd.com/gpu"
+          operator: "Equal"
+          value: "present"
+          effect: "NoSchedule"
+        ## Keep capturing on nodes being remediated — a node under repair is
+        ## exactly the one whose kernel log you want to read afterwards.
+        - key: "trainy.ai/node-state"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "cloud.google.com/gke-queued"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      containers:
+        - name: dmesg
+          image: __IMAGE__
+          ## Required to read the kernel ring buffer. See the security note at
+          ## the top of this file.
+          securityContext:
+            privileged: true
+          command:
+            - sh
+            - -c
+            - >
+              dmesg -w
+          resources:
+            requests:
+              cpu: 100m
+              memory: 200Mi
+            limits:
+              memory: 200Mi
+      terminationGracePeriodSeconds: 30

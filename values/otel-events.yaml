@@ -1,0 +1,198 @@
+## OpenTelemetry Collector — Kubernetes EVENTS shipper (Deployment).
+##
+## Chart: open-telemetry/opentelemetry-collector (>= 0.171.0 — see the
+## kube_api_qps note below, which earlier chart versions cannot express)
+##
+## Companion to values/otel-logs.yaml: that one ships pod logs, this one ships
+## events (OOMKilled, FailedScheduling, node pressure, image pull failures,
+## node-health events). Events are what turn "the GPU node went away" into "the
+## kubelet stopped posting status at 04:12".
+##
+## Deployment, replicaCount 1 — NOT a DaemonSet. Events are a cluster-wide API
+## stream, so one watcher sees everything; running it per node would ship every
+## event N times over.
+##
+## Installed by install.sh, which regenerates the namespace list below from
+## EVENT_NAMESPACES in trainy-telemetry.conf. By hand:
+##
+##   helm upgrade --install otel-deployment-central open-telemetry/opentelemetry-collector \
+##       --namespace otel-collector --create-namespace \
+##       --version 0.171.0 \
+##       --values values/otel-events.yaml \
+##       --set-string 'config.processors.resource/customer.attributes[0].value=<your-id>'
+
+mode: deployment
+replicaCount: 1
+
+fullnameOverride: otel-deployment-central
+
+image:
+  repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s
+
+presets:
+  kubernetesEvents:
+    enabled: true
+
+## The kubernetesEvents preset generates a ClusterRole granting watch/list on
+## events.k8s.io — enough for the namespace-scoped watch, but not for the
+## node-scoped watch below, which reads CORE v1 events (the involvedObject.kind
+## field selector is a core-v1 selector). These rules APPEND to the preset's.
+## Without them the node watch is RBAC-forbidden and silently ships no node
+## events — the most important ones here.
+clusterRole:
+  rules:
+    - apiGroups: [""]
+      resources: ["events"]
+      verbs: ["watch", "list"]
+
+config:
+  ############################################################################
+  ## NAMESPACE ALLOWLIST — DEFAULT DENY.
+  ##
+  ## THIS IS LOAD-BEARING. The kubernetesEvents preset watches events across ALL
+  ## namespaces by default. Without the `namespaces:` list below, this collector
+  ## would ship your workload events — which carry pod, job and workload names —
+  ## off-cluster. Scoping is done ON THE RECEIVER, so unlisted namespaces are
+  ## never watched in the first place; there is no second filter to keep in
+  ## sync, this one list is the whole control.
+  ##
+  ## Note this list is deliberately NARROWER than the pod-log allowlist. Every
+  ## namespace here costs a LIST call against the API server on every relist,
+  ## and Kubernetes events churn and expire fast — with client-go's default
+  ## QPS/burst, a relist across many namespaces gets throttled hard enough that
+  ## the resource version goes stale again before the new watch starts, which is
+  ## a self-sustaining `410 Gone` thrash. The kube_api_qps/kube_api_burst
+  ## overrides below raise that ceiling; keeping the list short keeps you well
+  ## under it.
+  ############################################################################
+  receivers:
+    ## Prune the chart's default receivers. This matters for isolation, not just
+    ## tidiness: the default pipeline accepts arbitrary OTLP log pushes from any
+    ## pod in the cluster, which would be a hole straight through the namespace
+    ## allowlist (the `namespaces:` scoping below constrains the events receiver
+    ## only). Events in, nothing else.
+    otlp: null
+    jaeger: null
+    zipkin: null
+    prometheus: null
+
+    k8sobjects:
+      ## Generous headroom over client-go's defaults (5/10) so a relist after a
+      ## `410 Gone` completes before the next compaction. See the note above.
+      kube_api_qps: 20
+      kube_api_burst: 40
+      objects:
+        - name: events
+          mode: watch
+          group: events.k8s.io
+          exclude_watch_type:
+            - DELETED
+          ## ===== TODO-ALLOWLIST-EVENTS : namespace list =====
+          ## Omitting this field means ALL namespaces cluster-wide. Never do
+          ## that. A namespace that does not exist produces no events and is
+          ## harmless to list.
+          namespaces:
+            - prometheus
+            ## Some clusters run a second monitoring stack in `monitoring`
+            ## alongside one in `prometheus`. Watch both.
+            - monitoring
+            - vm-operator
+            - victoria-logs
+            - otel-collector
+            - kube-system
+            - mpi-operator
+            - trainy-system
+            - kueue-system
+            - jobset-system
+            - trainy-controller-system
+
+        ## ===== NODE EVENTS, WITHOUT OPENING A NAMESPACE =====
+        ## Node-health checks write events ABOUT THE NODE, and Kubernetes files
+        ## events about cluster-scoped objects in the `default` namespace —
+        ## which is deliberately not on the allowlist above, since workloads
+        ## commonly land there.
+        ##
+        ## So: watch core v1 events cluster-wide, constrained by a field
+        ## selector to events whose involved object is a Node. The API SERVER
+        ## enforces the selector, so events about your pods and deployments are
+        ## never sent to this collector at all — a stronger guarantee than
+        ## dropping them after the fact.
+        ##
+        ## Disjoint from the watch above (node events live in `default`, which
+        ## that watch does not cover), so nothing is exported twice.
+        ##
+        ## Core v1 `events` (group omitted), not events.k8s.io: the
+        ## involvedObject.kind selector is a registered core-v1 selector;
+        ## events.k8s.io/v1 renames the field and does not support it.
+        - name: events
+          mode: watch
+          exclude_watch_type:
+            - DELETED
+          field_selector: involvedObject.kind=Node
+
+  processors:
+    resource/customer:
+      attributes:
+        - key: customer
+          value: "CHANGEME"
+          action: upsert
+
+  exporters:
+    otlphttp/central:
+      ## Events travel the OTel LOGS pipeline, so they use the same endpoint as
+      ## pod logs. install.sh overrides this from LOGS_ENDPOINT.
+      logs_endpoint: https://o11y-ingest.konduktor.trainy.us/insert/opentelemetry/v1/logs
+
+  service:
+    pipelines:
+      metrics: null
+      traces: null
+      logs:
+        receivers: [k8sobjects]
+        processors: [memory_limiter, resource/customer, batch]
+        exporters: [otlphttp/central]
+
+## No Service. This collector has no receivers listening (see the prune above);
+## it only reads the Kubernetes API and pushes out, so nothing ever connects to
+## it. This must be explicit: the chart creates a Service whenever mode is not
+## daemonset, and with every port disabled below that Service renders with an
+## empty spec.ports, which the API server rejects outright.
+service:
+  enabled: false
+
+## The receivers are pruned above, but the chart still renders container ports
+## for them unless disabled here. Nothing listens on those ports either way;
+## this is hygiene, so the pod does not advertise an ingest endpoint that does
+## not exist.
+ports:
+  otlp:
+    enabled: false
+  otlp-http:
+    enabled: false
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+
+## Same tolerations as the log shipper, so both land on the same nodes.
+tolerations:
+  - key: "nvidia.com/gpu"
+    operator: "Equal"
+    value: "present"
+    effect: "NoSchedule"
+  - key: "amd.com/gpu"
+    operator: "Equal"
+    value: "present"
+    effect: "NoSchedule"
+  - key: "trainy.konduktor.ai/faulty"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+  - key: "cloud.google.com/gke-queued"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"

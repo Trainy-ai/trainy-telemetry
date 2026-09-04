@@ -1,0 +1,44 @@
+## VictoriaMetrics operator — reconciles the VMAgent below into a Deployment.
+##
+## Chart: vm/victoria-metrics-operator
+##   helm repo add vm https://victoriametrics.github.io/helm-charts/
+##
+## The operator is here for two reasons, both load-bearing:
+##
+##   1. It converts your existing prometheus-operator objects — ServiceMonitor,
+##      PodMonitor, Probe — into its own scrape objects automatically. That is
+##      how the VMAgent picks up the exporters your monitoring stack already
+##      defines (node-exporter, kube-state-metrics, DCGM, kubelet) without us
+##      writing a single scrape config or touching your Prometheus.
+##
+##   2. It keeps the VMAgent reconciled, so config changes are a CR edit rather
+##      than a Helm upgrade.
+##
+## It installs no Prometheus, no storage and no Grafana. It manages only the
+## VictoriaMetrics CRs, and the only one this install creates is the VMAgent.
+##
+##   helm upgrade --install victoria-metrics-operator vm/victoria-metrics-operator \
+##       --namespace vm-operator --create-namespace \
+##       --version 0.67.2 \
+##       --values values/vm-operator.yaml
+
+## Off: the webhook only validates VictoriaMetrics CRs, and running it means a
+## cert lifecycle and an API-server dependency for no benefit on an install this
+## small. A malformed CR still fails loudly at reconcile time.
+admissionWebhooks:
+  enabled: false
+
+operator:
+  ## THE IMPORTANT ONE. Leave false — "disable_prometheus_converter: false"
+  ## means the converter is ON, which is what turns your ServiceMonitors into
+  ## VMServiceScrapes. Set it true and the VMAgent silently scrapes nothing but
+  ## the static jobs, with no error anywhere.
+  disable_prometheus_converter: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi

@@ -1,0 +1,110 @@
+## VMAgent — the metrics shipper.
+##
+## A VictoriaMetrics operator CR, not a Helm release. It scrapes the exporters
+## your cluster already runs and remote-writes a COPY of those series to Trainy.
+## Your own Prometheus is not modified, not replaced, and not read through — it
+## keeps scraping exactly what it scraped before.
+##
+## install.sh fills in the placeholders below and applies this with kubectl.
+## To apply it by hand, replace them yourself and:
+##   kubectl apply -f manifests/vmagent.yaml
+##
+## Placeholders (each written as a NAME wrapped in double underscores):
+##   __CUSTOMER__          your Trainy-assigned cluster identifier
+##   __NAMESPACE__         namespace to run in (default: vm-operator)
+##   __METRICS_ENDPOINT__  Trainy metrics ingest URL
+##   __MAX_SCRAPE_SIZE__   per-scrape response cap, in bytes
+##   __GPU_SCRAPE_INTERVAL__  scrape interval for the GPU exporter job
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vmagent-additional-scrape-configs
+  namespace: __NAMESPACE__
+stringData:
+  additional-scrape-configs.yaml: |
+    ## GPU metrics. This one job is defined statically rather than left to the
+    ## ServiceMonitor conversion, because the DCGM exporter's endpoints need two
+    ## specific fixes that its shipped ServiceMonitor does not apply:
+    ##
+    ##   - drop the node-feature-discovery master endpoint, which lives in the
+    ##     same namespace and is not a metrics target;
+    ##   - stamp `kubernetes_node` from the exporting pod's node. DCGM does not
+    ##     set it, and every GPU dashboard and alert keys off it. Without this
+    ##     relabel the series arrive but cannot be tied to a machine.
+    - job_name: gpu-metrics
+      scheme: http
+      metrics_path: /metrics
+      ## 1s. Deliberately fast: GPU faults (XID, thermal throttle, power brake)
+      ## are transient, and a 30s interval smooths straight over the spike you
+      ## are trying to catch. If ingest volume is a concern, 15s still catches
+      ## most of it — raise it here, not globally.
+      scrape_interval: __GPU_SCRAPE_INTERVAL__
+      kubernetes_sd_configs:
+        - role: endpoints
+          namespaces:
+            names:
+              - gpu-operator
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_endpoints_name]
+          regex: .*-node-feature-discovery-master
+          action: drop
+        - source_labels: [__meta_kubernetes_pod_node_name]
+          action: replace
+          target_label: kubernetes_node
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMAgent
+metadata:
+  name: vmagent-__CUSTOMER__
+  namespace: __NAMESPACE__
+spec:
+  ## Stamped on every series shipped. This is how your data is identified on the
+  ## Trainy side, and it mirrors the `customer` attribute the log and event
+  ## collectors stamp, so metrics and logs filter identically.
+  externalLabels:
+    customer: "__CUSTOMER__"
+
+  ## Select every scrape object in the cluster — including the VMServiceScrapes
+  ## the operator generates from your existing ServiceMonitors. This is what
+  ## makes the install work without us writing scrape configs for exporters we
+  ## do not own.
+  ##
+  ## Note what this means: if your monitoring stack defines a ServiceMonitor for
+  ## an application, its metrics are shipped too. To ship infrastructure only,
+  ## replace this with label selectors naming the scrapes you want.
+  selectAllByDefault: true
+
+  additionalScrapeConfigs:
+    name: vmagent-additional-scrape-configs
+    key: additional-scrape-configs.yaml
+
+  remoteWrite:
+    - url: __METRICS_ENDPOINT__
+      inlineUrlRelabelConfig:
+        ## Drop kube-state-metrics series for the `default` namespace before
+        ## they are sent. On a cluster that runs large numbers of short-lived
+        ## jobs, per-pod series from a single busy namespace can dominate the
+        ## whole payload — enough to overrun the scrape size cap below and take
+        ## every other kube_* series down with it, node conditions included.
+        ## Nothing about node, GPU or cluster health lives in these series.
+        - source_labels: [job, namespace]
+          separator: ";"
+          regex: kube-state-metrics;default
+          action: drop
+
+  extraArgs:
+    ## Per-scrape response size cap, in BYTES (128MB here). The default is 16MB,
+    ## and kube-state-metrics on a large cluster exceeds it. When it does, the
+    ## scrape is dropped SILENTLY — no error, target still shows as up, and
+    ## every kube_* series simply stops arriving, including the node conditions
+    ## the health alerts read. Sized well past the observed ceiling on purpose.
+    promscrape.maxScrapeSize: "__MAX_SCRAPE_SIZE__"
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi

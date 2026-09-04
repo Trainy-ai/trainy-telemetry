@@ -1,0 +1,224 @@
+# Trainy telemetry install — configuration.
+#
+#   cp trainy-telemetry.conf.example trainy-telemetry.conf
+#   $EDITOR trainy-telemetry.conf
+#   ./install.sh
+#
+# Format is KEY=value, one per line, # for comments. The installer parses this
+# file, it does not execute it — no shell expansion, no command substitution.
+# Quotes around values are optional and stripped.
+#
+# Keep this file: re-running install.sh with it is how you upgrade, change the
+# namespace allowlists, or turn a component on later. Every install is
+# idempotent, so re-running is always safe.
+#
+# The defaults below match Trainy's reference GPU cluster. On a cluster with the
+# same shape you should only need to set CUSTOMER.
+
+
+# ---------------------------------------------------------------- identity ---
+
+# REQUIRED. The identifier Trainy assigned to this cluster. Stamped on every
+# metric, log and event so your data is attributable on the Trainy side.
+# Lowercase letters, digits and dashes. Ask Trainy if you do not have one —
+# do not invent it, and do not reuse another cluster's.
+CUSTOMER=
+
+# kubectl/helm context to install into. Empty means your current context.
+# Set it explicitly if you have more than one cluster configured.
+KUBE_CONTEXT=
+
+
+# ---------------------------------------------------------------- endpoints ---
+
+# Where telemetry is shipped. Trainy provides these; the defaults are the
+# standard endpoints. Access is controlled at the network layer, so Trainy must
+# allowlist your cluster's egress IP before data will be accepted — confirm
+# that first, or the install will come up healthy and ship nothing.
+METRICS_ENDPOINT=https://o11y-ingest.konduktor.trainy.us/api/v1/write
+LOGS_ENDPOINT=https://o11y-ingest.konduktor.trainy.us/insert/opentelemetry/v1/logs
+
+
+# --------------------------------------------------------------- components ---
+
+# Metrics: the VictoriaMetrics operator plus a VMAgent. The agent scrapes the
+# exporters your monitoring stack already defines (via its ServiceMonitors) and
+# ships a copy out. It does not touch your Prometheus.
+INSTALL_METRICS=true
+
+# Pod logs from allowlisted infrastructure namespaces (OpenTelemetry DaemonSet).
+INSTALL_LOGS=true
+
+# Kubernetes events from allowlisted namespaces, plus node events
+# (OpenTelemetry Deployment).
+INSTALL_EVENTS=true
+
+# GPU node health checks (trainy-npd), and optionally the controller that acts
+# on them — see NODE_HEALTH_MODE below.
+INSTALL_NODE_HEALTH=true
+
+# Kernel logs. A DaemonSet running `dmesg -w` on every node, streamed to stdout
+# and picked up by the log shipper above. This is where hardware failure shows
+# up first and in most detail — Xid faults, PCIe errors, mlx5 link events, NVMe
+# timeouts, soft lockups — and none of it appears in any other log.
+#
+# The container is PRIVILEGED, because reading the kernel ring buffer requires
+# it. It runs one command and nothing else; see manifests/dmesg.yaml. If your
+# pod-security policy forbids this, the exception only needs to cover
+# DMESG_NAMESPACE below, which is why it gets its own namespace.
+INSTALL_DMESG=true
+DMESG_NAMESPACE=dmesg-logging
+
+# Kernel-log container image. Any image with `sh` and `dmesg` works. Repoint
+# this at your own registry if you mirror images or hit Docker Hub rate limits.
+DMESG_IMAGE=ubuntu:22.04
+
+# Namespaces each component installs into. Defaults match the reference install,
+# which keeps `helm list` output consistent across clusters.
+METRICS_NAMESPACE=vm-operator
+OTEL_NAMESPACE=otel-collector
+NODE_HEALTH_NAMESPACE=trainy-system
+
+
+# ------------------------------------------------------------------ metrics ---
+
+# Per-scrape response size cap, in BYTES (default 128MiB). The VMAgent default
+# is 16MB, which kube-state-metrics exceeds on a large cluster — and when it
+# does, the scrape is dropped silently: no error, target still shows up, and
+# every kube_* series stops arriving, node health conditions included.
+MAX_SCRAPE_SIZE=134217728
+
+# Scrape interval for the GPU metrics exporter. GPU faults are transient and a
+# coarse interval smooths straight over them. Raise to 15s if central ingest
+# volume is a concern; this affects only the GPU job.
+GPU_SCRAPE_INTERVAL=1s
+
+
+# -------------------------------------------------------------- node health ---
+
+# remediate  (default) run the checks AND the controller that acts on them: a
+#            faulted GPU node is cordoned, handed to your provider for repair,
+#            validated, and returned to service. This is what the chart does by
+#            default and what Trainy runs on its own clusters.
+# detect     checks only. Conditions are published and alertable; nothing is
+#            cordoned, drained or repaired. Use this for a phased rollout when
+#            you want to watch what the checks would have acted on first.
+#
+# Either way, read the auto-remediation section of the install guide — the
+# default acts on your nodes, and installs a toleration patch on your GPU
+# operator's ClusterPolicy so a node under repair keeps its device plugin.
+NODE_HEALTH_MODE=remediate
+
+# remediate mode only. Who performs the physical repair:
+#   Provider   your hardware provider reboots/RMAs; the controller drives the
+#              state machine around them. The right answer for a managed cluster.
+#   InCluster  the controller reboots nodes itself.
+REMEDIATION_MODE=Provider
+
+# remediate mode only. What the controller may do about workloads still running
+# on a node it wants to repair:
+#   askApproval  wait for a human to approve the drain (start here)
+#   auto         drain without asking
+#   never        never drain; wait for the node to empty on its own
+DRAIN_POLICY=auto
+
+# remediate mode only. Healthy-node target for the GPU pool. Left deliberately
+# high: the pool promotes repaired nodes back to healthy whenever it is under
+# target, and a high target means that promotion is never held back by pool
+# sizing. Empty means "however many GPU nodes exist at install time".
+DESIRED_HEALTHY=1000
+
+# Node label selecting your GPU nodes, used for the node-health DaemonSet and
+# the node pool. The default is the label gpu-operator's feature discovery
+# applies. AMD clusters typically use feature.node.kubernetes.io/amd-gpu=true.
+GPU_NODE_SELECTOR=nvidia.com/gpu.present=true
+
+
+# ----------------------------------------------------------------- hardware ---
+
+# GPUs per node. Used by the checks that verify none have fallen off the bus.
+EXPECTED_GPUS=8
+
+# RDMA devices the checks should inspect, comma-separated CA names.
+#
+# EXPECT TO SET THIS. Empty means "inspect every CA the node reports", which is
+# only correct if every RDMA device on the node is a training-fabric rail. On a
+# typical 8-GPU node it is not: those machines carry roughly 24 mlx5 devices of
+# which about 16 are fabric, the rest being storage, management, or restricted
+# physical functions whose ports are legitimately not Active. Left unset there,
+# the port-state check alarms on the non-fabric devices, on every node at once.
+#
+# Trainy sets this explicitly on every cluster it operates. To derive yours:
+#
+#   ibstat -l                       # CA names present on the node
+#   ibv_devinfo | grep -E 'hca_id|link_layer|state'
+#                                   # which are Active, and InfiniBand vs
+#                                   # Ethernet (RoCE) — you do not declare that
+#                                   # anywhere, the checks detect it
+#
+# Keep the ones carrying training traffic. For reference, the 16 fabric rails on
+# the 8-GPU B300 nodes Trainy runs:
+#   RDMA_INTERFACES=mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_8,mlx5_9,mlx5_10,mlx5_11,mlx5_16,mlx5_17,mlx5_20,mlx5_21,mlx5_22,mlx5_23
+#
+# Do not copy that list blindly — device numbering is a property of the machine,
+# and a wrong list is worse than an empty one.
+RDMA_INTERFACES=
+
+# How many RDMA ports should be Active on a healthy node — normally the number
+# of devices listed above (16, for the example). Empty means the check does not
+# enforce a count. Set it together with RDMA_INTERFACES: a wrong value here
+# produces a false alarm on every node at once.
+IB_EXPECTED_ACTIVE_PORTS=
+
+
+# ---------------------------------------------------------------- allowlists ---
+
+# Namespaces whose POD LOGS are shipped. Default deny: anything not listed here
+# is never read. Your application namespaces should not be on this list.
+# Namespaces that do not exist on your cluster are harmless.
+#
+# NOTE: DMESG_NAMESPACE must appear here, or the kernel logs are captured on
+# every node and then dropped. The installer warns if the two disagree.
+LOG_NAMESPACES=prometheus,monitoring,vm-operator,victoria-logs,otel-collector,gpu-operator,dmesg-logging,kube-system,mpi-operator,teleport,local-path-storage,network-operator,trainy-system,kueue-system,jobset-system,trainy-controller-system
+
+# Namespaces whose EVENTS are shipped. Deliberately shorter than the log list —
+# each namespace costs an API LIST call on every watch relist, and a long list
+# can throttle itself into a relist loop. Node events are collected regardless
+# of this list, by object kind rather than by namespace.
+EVENT_NAMESPACES=prometheus,monitoring,vm-operator,victoria-logs,otel-collector,kube-system,mpi-operator,trainy-system,kueue-system,jobset-system,trainy-controller-system
+
+
+# ------------------------------------------------------------------ versions ---
+
+# Pinned upstream chart versions. Change only deliberately.
+VM_OPERATOR_CHART_VERSION=0.67.2
+OTEL_LOGS_CHART_VERSION=0.131.0
+# Events needs >= 0.171.0 for the API rate-limit settings on the events
+# receiver; older charts cannot express them and will relist-loop on a busy
+# cluster.
+OTEL_EVENTS_CHART_VERSION=0.171.0
+
+# Trainy node-health chart.
+#
+# PIN THIS. Empty takes the latest published release — and until a release is
+# tagged, the installer falls back to the latest development build, which moves
+# with every merge to main. Two installs a day apart then get different
+# controllers. The installer prints both pin forms when it falls back, so you
+# can copy one straight out of the first run's output.
+#
+# Strongest: pin the digest, which cannot move even if a tag is re-pushed. Set
+# it on the chart reference and leave the version empty:
+#   NODE_HEALTH_CHART=oci://ghcr.io/trainy-ai/charts/trainy-remediation@sha256:<digest>
+#   NODE_HEALTH_CHART_VERSION=
+#
+# Or pin the version, which is the normal choice once a release exists:
+#   NODE_HEALTH_CHART_VERSION=0.2.0
+#
+# To see what is available:
+#   helm show chart oci://ghcr.io/trainy-ai/charts/trainy-remediation --devel
+#
+# Note a pinned chart is not a fully pinned install: the chart still resolves
+# its container images by tag. Release charts pin those to the release version,
+# development builds pin them to the commit sha.
+NODE_HEALTH_CHART=oci://ghcr.io/trainy-ai/charts/trainy-remediation
+NODE_HEALTH_CHART_VERSION=
