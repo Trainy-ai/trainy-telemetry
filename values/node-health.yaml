@@ -74,6 +74,19 @@ npd:
     egressHttps:
       enabled: true
 
+    ## Off by default, overriding the chart, because most clusters have no NFS
+    ## and a check with nothing to watch is noise in the condition list rather
+    ## than signal. Turn it on only where a hard NFS mount actually exists:
+    ##
+    ##   --set npd.checks.nfsHealth.enabled=true
+    ##
+    ## Worth having where it applies. A hard NFS mount whose server stops
+    ## acking writes hangs the client forever in uninterruptible sleep — no
+    ## error, no timeout — and nothing on the node fixes it, which is why the
+    ## condition stays report-only even when enabled.
+    nfsHealth:
+      enabled: false
+
   ## Per-node exporters that ship alongside the checks.
   roceExporter:
     enabled: true

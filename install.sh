@@ -78,6 +78,7 @@ REMEDIATION_MODE="Provider"
 EXPECTED_GPUS="8"
 RDMA_INTERFACES=""
 IB_EXPECTED_ACTIVE_PORTS=""
+GPU_VENDOR="nvidia"
 GPU_NODE_SELECTOR="nvidia.com/gpu.present=true"
 LOG_NAMESPACES="prometheus,monitoring,vm-operator,victoria-logs,otel-collector,gpu-operator,dmesg-logging,kube-system,mpi-operator,teleport,local-path-storage,network-operator,trainy-system,kueue-system,jobset-system,trainy-controller-system"
 EVENT_NAMESPACES="prometheus,monitoring,vm-operator,victoria-logs,otel-collector,kube-system,mpi-operator,trainy-system,kueue-system,jobset-system,trainy-controller-system"
@@ -133,7 +134,7 @@ INSTALL_METRICS INSTALL_LOGS INSTALL_EVENTS INSTALL_NODE_HEALTH \
 INSTALL_DMESG DMESG_NAMESPACE DMESG_IMAGE \
 MAX_SCRAPE_SIZE GPU_SCRAPE_INTERVAL \
 NODE_HEALTH_MODE DRAIN_POLICY DESIRED_HEALTHY REMEDIATION_MODE \
-EXPECTED_GPUS RDMA_INTERFACES IB_EXPECTED_ACTIVE_PORTS GPU_NODE_SELECTOR \
+EXPECTED_GPUS RDMA_INTERFACES IB_EXPECTED_ACTIVE_PORTS GPU_NODE_SELECTOR GPU_VENDOR \
 LOG_NAMESPACES EVENT_NAMESPACES \
 VM_OPERATOR_CHART_VERSION OTEL_LOGS_CHART_VERSION OTEL_EVENTS_CHART_VERSION \
 NODE_HEALTH_CHART NODE_HEALTH_CHART_VERSION"
@@ -266,9 +267,28 @@ case "$REMEDIATION_MODE" in
   Provider|InCluster) ;;
   *) die "REMEDIATION_MODE must be Provider or InCluster; got '$REMEDIATION_MODE'" ;;
 esac
+case "${GPU_VENDOR,,}" in
+  nvidia|amd) GPU_VENDOR="${GPU_VENDOR,,}" ;;
+  *) die "GPU_VENDOR must be 'nvidia' or 'amd'; got '$GPU_VENDOR'" ;;
+esac
+
+# The node selector has to match the vendor, and getting this wrong fails
+# silently: the DaemonSet ends up with an unsatisfiable selector and schedules
+# on zero nodes, which Kubernetes reports as a perfectly healthy 0/0.
+if [[ "$GPU_VENDOR" == "amd" ]]; then
+  if [[ "$GPU_NODE_SELECTOR" == "nvidia.com/gpu.present=true" ]]; then
+    GPU_NODE_SELECTOR="feature.node.kubernetes.io/amd-gpu=true"
+    info "GPU_VENDOR=amd — using the AMD node label ($GPU_NODE_SELECTOR)"
+  elif [[ "$GPU_NODE_SELECTOR" == nvidia.com/* ]]; then
+    die "GPU_VENDOR=amd but GPU_NODE_SELECTOR names an NVIDIA label ('$GPU_NODE_SELECTOR').
+Set it to the label your AMD GPU nodes carry, e.g.
+  GPU_NODE_SELECTOR=feature.node.kubernetes.io/amd-gpu=true"
+  fi
+fi
 
 for f in "$VALUES_DIR/vm-operator.yaml" "$VALUES_DIR/otel-logs.yaml" \
          "$VALUES_DIR/otel-events.yaml" "$VALUES_DIR/node-health.yaml" \
+         "$VALUES_DIR/node-health-amd.yaml" \
          "$MANIFEST_DIR/vmagent.yaml" "$MANIFEST_DIR/dmesg.yaml"; do
   [[ -f "$f" ]] || die "missing file: $f"
 done
@@ -591,10 +611,17 @@ if is_true "$INSTALL_NODE_HEALTH"; then
     fi
   } > "$NH_OVERLAY"
 
+  # AMD clusters load a different check set entirely — no Xid, no DCGM, no
+  # NVLink — and must not inherit the NVIDIA node label. See the overlay.
+  NH_VENDOR_VALUES=""
+  if [[ "$GPU_VENDOR" == "amd" ]]; then
+    NH_VENDOR_VALUES="$VALUES_DIR/node-health-amd.yaml"
+  fi
+
   if [[ "$NODE_HEALTH_MODE" == "remediate" ]]; then
     step "Node health (detection + auto-remediation)"
     warn "remediate mode: the controller may cordon, drain and repair GPU nodes."
-    warn "  drain policy: $DRAIN_POLICY   repair mode: $REMEDIATION_MODE"
+    warn "  drain policy: $DRAIN_POLICY   repair mode: $REMEDIATION_MODE   vendor: $GPU_VENDOR"
   else
     step "Node health (detection only)"
   fi
@@ -648,6 +675,7 @@ To install from a repository checkout instead, set in your config:
     --namespace "$NODE_HEALTH_NAMESPACE" --create-namespace \
     ${NODE_HEALTH_CHART_VERSION:+--version "$NODE_HEALTH_CHART_VERSION"} $NH_DEVEL \
     --values "$VALUES_DIR/node-health.yaml" \
+    ${NH_VENDOR_VALUES:+--values "$NH_VENDOR_VALUES"} \
     --values "$NH_OVERLAY" \
     --wait --timeout 15m
 

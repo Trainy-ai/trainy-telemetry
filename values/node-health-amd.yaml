@@ -1,0 +1,114 @@
+## trainy-remediation — AMD GPU overlay.
+##
+## Applied ON TOP OF values/node-health.yaml, never instead of it:
+##
+##   helm upgrade --install trainy-remediation \
+##       oci://ghcr.io/trainy-ai/charts/trainy-remediation \
+##       --namespace trainy-system --create-namespace \
+##       --values values/node-health.yaml \
+##       --values values/node-health-amd.yaml
+##
+## install.sh applies both automatically when GPU_VENDOR=amd. Everything shared
+## between vendors — Provider mode, validation policy, serviceMonitor, the
+## namespaces the controller will not evict from — stays in the base file so the
+## two profiles cannot drift.
+##
+## What this changes: which checks run, where they run, and which conditions may
+## cordon. Nothing else.
+
+npd:
+  ## Load the AMD check set. The chart then emits trainy.ai/amd-* conditions
+  ## (GpuCount, GpuDriver, GpuEcc, GpuPcie, Kfd, Xgmi, BadPages, DevicePlugin)
+  ## and stops loading the NVIDIA GPU checks entirely — no Xid, no DCGM, no
+  ## NVLink, no fabric manager. Vendor-neutral checks (PCIe, AER, NVMe, DNS,
+  ## kernel modules, thermals, RDMA counts) keep running on both profiles.
+  amd:
+    enabled: true
+
+  ## Mellanox Firmware Tools sidecar — reads PHY counters off ConnectX
+  ## firmware. Nothing to read on AMD/Pensando hardware, and left enabled it
+  ## renders a DaemonSet still selecting nvidia.com/gpu.present, which then
+  ## schedules on zero nodes and sits there looking like a broken component.
+  mlxlinkExporter:
+    enabled: false
+
+  nodeSelector:
+    ## THE ONE THAT BITES. Helm MERGES maps, so setting the AMD label without
+    ## nulling the NVIDIA one leaves the DaemonSet requiring BOTH labels — and
+    ## it then schedules on exactly zero nodes, silently, because a DaemonSet
+    ## with an unsatisfiable selector is not an error. The explicit null is what
+    ## removes the inherited key.
+    nvidia.com/gpu.present: null
+    ## The label AMD's GPU Operator applies via node feature discovery. If your
+    ## cluster labels AMD nodes differently, change this and null this key the
+    ## same way.
+    feature.node.kubernetes.io/amd-gpu: "true"
+
+  checks:
+    ## Off because they read NVIDIA or Mellanox interfaces that do not exist on
+    ## this hardware. The AMD profile already omits the NVIDIA GPU checks and
+    ## the mlx5-specific link-flap check; these are the remainder, named
+    ## explicitly so an install cannot pick them up from a future default.
+    gpuBus:
+      ## nvidia-smi bus enumeration.
+      enabled: false
+    mlx5Kmsg:
+      ## mlx5_core kernel messages. AMD/Pensando NICs use a different driver, so
+      ## this can only ever be silent here.
+      enabled: false
+    rdmaLinkFlapping:
+      ## mlx5_core-specific. The AMD profile suppresses it regardless; set here
+      ## so the intent is visible rather than implicit.
+      enabled: false
+
+    ## The base profile turns these on for Trainy's Mellanox/RoCE fleet. They
+    ## are off here because the reference AMD cluster runs none of them: the
+    ## PHY check shells out to `mlxlink` from Mellanox Firmware Tools, which is
+    ## not present on AMD/Pensando NICs, and the RoCE checks are tuned against
+    ## that fleet's fabric. They self-skip on a node with no RDMA devices rather
+    ## than failing, so this is about avoiding noise, not avoiding breakage.
+    ##
+    ## If your AMD cluster does run RDMA NICs that expose /sys/class/infiniband,
+    ## re-enable ibPortState first and confirm it reports cleanly before adding
+    ## the rest.
+    mlxlinkPhy:
+      enabled: false
+    ibPortState:
+      enabled: false
+    rdmaGidLayout:
+      enabled: false
+    roceMtu:
+      enabled: false
+
+remediation:
+  conditions:
+    ## Belt and braces. With the AMD profile these NVIDIA and Mellanox
+    ## conditions are never emitted, so listing them changes no behaviour today
+    ## — but it keeps them out of the controller's cordon allowlist, so the
+    ## allowlist reads as a description of this cluster rather than of the
+    ## chart's defaults. If a future chart adds a check that emits one of these
+    ## on AMD hardware, it still cannot cordon.
+    DcgmHealth:       {taint: false}
+    GpuXid:           {taint: false}
+    GpuEcc:           {taint: false}
+    GpuBus:           {taint: false}
+    GpuPcie:          {taint: false}
+    GpuFabricMgr:     {taint: false}
+    GpuRowRemap:      {taint: false}
+    NvlinkSpeed:      {taint: false}
+    Mlx5PciPower:     {taint: false}
+    Mlx5PortModule:   {taint: false}
+    RdmaLink:         {taint: false}
+    RdmaLinkFlapping: {taint: false}
+    RdmaEffectiveBer: {taint: false}
+    RdmaModuleTemp:   {taint: false}
+    RdmaGidLayout:    {taint: false}
+    ## The vendor-neutral GpuCount condition comes from the NVIDIA check, which
+    ## does not run here; amd-GpuCount below is its counterpart.
+    GpuCount:         {taint: false}
+
+    ## The AMD conditions keep the chart's own policy, which cordons on the
+    ## hard faults (driver, ECC, PCIe, KFD, XGMI, bad pages) and reports on the
+    ## rest. amd-GpuCount is raised to cordon here: a GPU that has fallen off
+    ## the bus makes the node unfit for scheduling, exactly as on NVIDIA.
+    amd-GpuCount:     {taint: true}

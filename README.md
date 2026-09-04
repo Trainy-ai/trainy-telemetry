@@ -33,7 +33,8 @@ everything it installed: `./install.sh --uninstall`.
 | `manifests/vmagent.yaml` | The metrics shipper itself (a VMAgent CR), plus the GPU scrape job. |
 | `values/otel-logs.yaml` | Pod logs, from allowlisted infrastructure namespaces only. |
 | `values/otel-events.yaml` | Kubernetes events, from allowlisted namespaces plus node events. |
-| `values/node-health.yaml` | GPU node health checks (`trainy-npd`). Detection only by default. |
+| `values/node-health.yaml` | GPU node health checks (`trainy-npd`) and the remediation controller. |
+| `values/node-health-amd.yaml` | AMD overlay — applied on top of the above when `GPU_VENDOR=amd`. Swaps the NVIDIA check set for the AMD one. |
 | `manifests/dmesg.yaml` | Kernel-log DaemonSet, one pod per node. Privileged — read the header before approving it. |
 
 Every file is commented with what it does and why, and each carries the exact

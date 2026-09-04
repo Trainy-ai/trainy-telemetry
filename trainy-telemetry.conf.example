@@ -128,9 +128,22 @@ DRAIN_POLICY=auto
 # sizing. Empty means "however many GPU nodes exist at install time".
 DESIRED_HEALTHY=1000
 
+# GPU vendor: nvidia or amd. This selects which health checks run, and they are
+# not interchangeable — an AMD cluster must not run the NVIDIA checks (Xid, DCGM,
+# NVLink, fabric manager read NVIDIA interfaces that do not exist) and vice
+# versa. Setting amd loads values/node-health-amd.yaml on top of the base
+# profile: AMD check set, AMD node label, and the NVIDIA and Mellanox conditions
+# barred from cordoning.
+GPU_VENDOR=nvidia
+
 # Node label selecting your GPU nodes, used for the node-health DaemonSet and
-# the node pool. The default is the label gpu-operator's feature discovery
-# applies. AMD clusters typically use feature.node.kubernetes.io/amd-gpu=true.
+# the node pool. The default is the label NVIDIA gpu-operator's feature
+# discovery applies. With GPU_VENDOR=amd and this left at its default, the
+# installer switches it to feature.node.kubernetes.io/amd-gpu=true for you.
+#
+# Getting this wrong fails silently rather than loudly: the DaemonSet ends up
+# with a selector nothing satisfies and schedules on zero nodes, which reads as
+# a healthy 0/0 rather than an error.
 GPU_NODE_SELECTOR=nvidia.com/gpu.present=true
 
 
