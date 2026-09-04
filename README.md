@@ -10,6 +10,7 @@ https://docs.trainy.ai/cluster-telemetry
 ## Quickstart
 
 ```bash
+git clone https://github.com/Trainy-ai/trainy-telemetry
 cd trainy-telemetry
 
 cp trainy-telemetry.conf.example trainy-telemetry.conf
