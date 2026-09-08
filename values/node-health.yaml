@@ -80,10 +80,16 @@ npd:
     ##
     ##   --set npd.checks.nfsHealth.enabled=true
     ##
-    ## Worth having where it applies. A hard NFS mount whose server stops
-    ## acking writes hangs the client forever in uninterruptible sleep — no
-    ## error, no timeout — and nothing on the node fixes it, which is why the
-    ## condition stays report-only even when enabled.
+    ## Worth having where it applies. A wedged hard NFS mount hangs the client
+    ## forever in uninterruptible sleep — no error, no timeout — whether the
+    ## server stopped acking writes or, as on 2026-09-07, the pNFS flexfiles
+    ## data servers went unreachable while metadata kept working and every
+    ## file read hung. It stays report-only here because a server-side outage
+    ## hits every node that mounts the export at once, and cordoning all of
+    ## them repairs nothing; where the cause is node-local instead (a dead NIC
+    ## optic, miscabled storage ports) a cordon does help, so
+    ## remediation.conditions.NfsHealth.taint=true is a reasonable per-cluster
+    ## override.
     nfsHealth:
       enabled: false
 
@@ -211,9 +217,11 @@ remediation:
     EgressHttps: {taint: true}
     ##
     ## NfsHealth is NOT listed, so it keeps the chart's report-only default. A
-    ## hung NFS server hits every node that mounts it at once, and the root
-    ## cause is on the server, so cordoning clients repairs nothing. It still
-    ## publishes, still alerts, and still blocks promotion out of standby.
+    ## hung NFS server hits every node that mounts it at once, so cordoning the
+    ## clients repairs nothing and costs the whole cluster. It still publishes,
+    ## still alerts, and still blocks promotion out of standby. Override to
+    ## {taint: true} on a cluster whose NFS faults are node-local rather than
+    ## server-side — see the NfsHealth notes above.
 
     ## Report-only. These are real signals worth alerting on, but cordoning on
     ## them costs more capacity than it saves: some are cluster-wide when they
