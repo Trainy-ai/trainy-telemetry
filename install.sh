@@ -581,6 +581,20 @@ if is_true "$INSTALL_NODE_HEALTH"; then
     echo "npd:"
     echo "  nodeSelector:"
     echo "    $NH_KEY: \"$NH_VAL\""
+    # Helm merges maps across --values files rather than replacing them. The
+    # chart's own default (nvidia.com/gpu.present) and the AMD overlay's
+    # default (feature.node.kubernetes.io/amd-gpu) are each nulled against
+    # THEIR OWN OVERLAY already, but neither knows about a GPU_NODE_SELECTOR
+    # customized to something else here -- so a customized selector merges
+    # ON TOP of whichever vendor default is still active, producing a
+    # DaemonSet that requires BOTH labels and silently schedules on zero
+    # nodes. Null every known vendor default this run did not choose, exactly
+    # the same trap the AMD overlay's own comment warns about, one layer up.
+    for _nh_default_key in "nvidia.com/gpu.present" "feature.node.kubernetes.io/amd-gpu"; do
+      if [[ "$_nh_default_key" != "$NH_KEY" ]]; then
+        echo "    ${_nh_default_key}: null"
+      fi
+    done
     if [[ -n "$RDMA_INTERFACES" || -n "$IB_EXPECTED_ACTIVE_PORTS" ]]; then
       echo "  env:"
       if [[ -n "$RDMA_INTERFACES" ]]; then

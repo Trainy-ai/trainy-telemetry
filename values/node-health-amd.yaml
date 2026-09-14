@@ -71,14 +71,38 @@ npd:
     ## If your AMD cluster does run RDMA NICs that expose /sys/class/infiniband,
     ## re-enable ibPortState first and confirm it reports cleanly before adding
     ## the rest.
+    ##
+    ## amd-cluster (nationalcompute.com, Pensando "ionic" AINIC RoCE NICs) does
+    ## expose /sys/class/infiniband/ionic_* -- confirmed 2026-09-12 by a real
+    ## RDMA transport failure whose root cause was exactly what RdmaGidLayout
+    ## detects: NCCL_IB_GID_INDEX pinned to 1 (Primus's own AINIC default, see
+    ## docs/04-technical-guides/multi-node-networking.md upstream), while two
+    ## specific ionic ports on two specific nodes had rebuilt their GID table
+    ## with the routable v2 GID at a different index, so ibv_query_gid/
+    ## ibv_modify_qp failed with "local GID N/A" at index 1 -- a live
+    ## demonstration of the exact scenario this check's docstring describes.
+    ## ibPortState (RdmaLink) reads the same sysfs data and is enabled
+    ## alongside it per the guidance above, rather than leaving it off while
+    ## turning on a check that depends on the same underlying signal.
     mlxlinkPhy:
       enabled: false
     ibPortState:
-      enabled: false
+      enabled: true
     rdmaGidLayout:
-      enabled: false
+      enabled: true
     roceMtu:
       enabled: false
+    ## ionic/AINIC's dmesg-only sibling of the two above: the ionic driver
+    ## exposes no counters/ or hw_counters/ sysfs directory at all (confirmed
+    ## live on this cluster), so a transceiver notifyq event in dmesg is the
+    ## ONLY channel this hardware has to report trouble while the link stays
+    ## reported Active. Validated on a real incident 2026-09-14: two
+    ## IONIC_EVENT_XCVR events on one node's ports (ionic_4, ionic_7)
+    ## correlated directly with a live RCCL transport failure
+    ## (IBV_WC_RETRY_EXC_ERR) against that node, while the peer node in the
+    ## same failing QPs showed none in its own dmesg over the same window.
+    ionicKmsg:
+      enabled: true
 
 remediation:
   conditions:
