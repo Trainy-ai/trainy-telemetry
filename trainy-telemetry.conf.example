@@ -77,6 +77,9 @@ DMESG_IMAGE=ubuntu:22.04
 # which keeps `helm list` output consistent across clusters.
 METRICS_NAMESPACE=vm-operator
 OTEL_NAMESPACE=otel-collector
+# The events shipper runs next to the node-health checks (trainy-system) since
+# 2026-10-02; a copy left in OTEL_NAMESPACE by an older install is retired.
+EVENTS_NAMESPACE=trainy-system
 NODE_HEALTH_NAMESPACE=trainy-system
 
 

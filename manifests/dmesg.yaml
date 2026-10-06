@@ -70,6 +70,10 @@ spec:
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
+        ## Slurm compute nodes (install/trainy-slurm).
+        - key: "trainy.ai/slurm-compute"
+          operator: "Exists"
+          effect: "NoSchedule"
       containers:
         - name: dmesg
           image: __IMAGE__

@@ -16,7 +16,7 @@
 ## EVENT_NAMESPACES in trainy-telemetry.conf. By hand:
 ##
 ##   helm upgrade --install otel-deployment-central open-telemetry/opentelemetry-collector \
-##       --namespace otel-collector --create-namespace \
+##       --namespace trainy-system --create-namespace \
 ##       --version 0.171.0 \
 ##       --values values/otel-events.yaml \
 ##       --set-string 'config.processors.resource/customer.attributes[0].value=<your-id>'

@@ -59,6 +59,7 @@ CUSTOMER=""
 KUBE_CONTEXT=""
 METRICS_NAMESPACE="vm-operator"
 OTEL_NAMESPACE="otel-collector"
+EVENTS_NAMESPACE="trainy-system"   # the events shipper, next to the node-health checks (since 2026-10-02)
 NODE_HEALTH_NAMESPACE="trainy-system"
 METRICS_ENDPOINT="https://o11y-ingest.konduktor.trainy.us/api/v1/write"
 LOGS_ENDPOINT="https://o11y-ingest.konduktor.trainy.us/insert/opentelemetry/v1/logs"
@@ -215,7 +216,7 @@ if $UNINSTALL; then
     warn "  kubectl -n $METRICS_NAMESPACE delete vmagent vmagent-<your-id>"
   fi
   k delete ds dmesg -n "$DMESG_NAMESPACE" --ignore-not-found 2>/dev/null || true
-  for pair in "$REL_LOGS:$OTEL_NAMESPACE" "$REL_EVENTS:$OTEL_NAMESPACE" \
+  for pair in "$REL_LOGS:$OTEL_NAMESPACE" "$REL_EVENTS:$EVENTS_NAMESPACE" "$REL_EVENTS:$OTEL_NAMESPACE" \
               "$REL_NODE_HEALTH:$NODE_HEALTH_NAMESPACE" "$REL_VM_OPERATOR:$METRICS_NAMESPACE"; do
     rel="${pair%%:*}"; ns="${pair##*:}"
     if installed "$rel" "$ns"; then
@@ -403,7 +404,7 @@ verify_install() {
     check_rollout deploy "vmagent-vmagent-$CUSTOMER" "$METRICS_NAMESPACE" "metrics shipper (VMAgent)"
   fi
   check_rollout ds     "$REL_LOGS-agent" "$OTEL_NAMESPACE" "log shipper"
-  check_rollout deploy "$REL_EVENTS"     "$OTEL_NAMESPACE" "event shipper"
+  check_rollout deploy "$REL_EVENTS"     "$EVENTS_NAMESPACE" "event shipper"
   check_rollout ds     dmesg "$DMESG_NAMESPACE" "kernel logs (dmesg)"
   check_rollout ds     "$REL_NODE_HEALTH-trainy-remediation-npd" "$NODE_HEALTH_NAMESPACE" "node health checks"
   if [[ "$NODE_HEALTH_MODE" == "remediate" ]]; then
@@ -546,13 +547,19 @@ if is_true "$INSTALL_EVENTS"; then
   if $DRY_RUN; then echo "  --- generated allowlist overlay ---"; sed 's/^/  /' "$EVENT_OVERLAY"; fi
 
   h upgrade --install "$REL_EVENTS" open-telemetry/opentelemetry-collector \
-    --namespace "$OTEL_NAMESPACE" --create-namespace \
+    --namespace "$EVENTS_NAMESPACE" --create-namespace \
     ${OTEL_EVENTS_CHART_VERSION:+--version "$OTEL_EVENTS_CHART_VERSION"} \
     --values "$VALUES_DIR/otel-events.yaml" \
     --values "$EVENT_OVERLAY" \
     --set-string "config.processors.resource/customer.attributes[0].value=$CUSTOMER" \
     --set-string "config.exporters.otlphttp/central.logs_endpoint=$LOGS_ENDPOINT" \
     --wait --timeout 10m
+  # Until 2026-10-02 this release lived in OTEL_NAMESPACE; retire that copy now
+  # that the new one is up, so events are not shipped twice.
+  if [[ "$EVENTS_NAMESPACE" != "$OTEL_NAMESPACE" ]] && installed "$REL_EVENTS" "$OTEL_NAMESPACE"; then
+    info "retiring $REL_EVENTS in $OTEL_NAMESPACE (it now runs in $EVENTS_NAMESPACE)"
+    h uninstall "$REL_EVENTS" -n "$OTEL_NAMESPACE"
+  fi
 fi
 
 # ====================================================================== dmesg ==
@@ -747,5 +754,6 @@ Local sanity checks:
   kubectl -n $METRICS_NAMESPACE get pods
   kubectl -n $METRICS_NAMESPACE logs deploy/vmagent-vmagent-$CUSTOMER --tail=20
   kubectl -n $OTEL_NAMESPACE get pods
+  kubectl -n $EVENTS_NAMESPACE get pods -l app.kubernetes.io/instance=$REL_EVENTS
   kubectl get nodes -o json | grep -o '"type": *"trainy\.ai/[^"]*"' | sort -u
 EOF

@@ -235,3 +235,11 @@ tolerations:
     operator: "Equal"
     value: "true"
     effect: "NoSchedule"
+  ## Slurm compute nodes (install/trainy-slurm) and nodes under remediation:
+  ## NPD's own logs come from exactly these.
+  - key: "trainy.ai/slurm-compute"
+    operator: "Exists"
+    effect: "NoSchedule"
+  - key: "trainy.ai/node-state"
+    operator: "Exists"
+    effect: "NoSchedule"
