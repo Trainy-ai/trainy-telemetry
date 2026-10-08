@@ -106,33 +106,234 @@ npd:
 
 remediation:
   conditions:
-    ## Belt and braces. With the AMD profile these NVIDIA and Mellanox
-    ## conditions are never emitted, so listing them changes no behaviour today
-    ## — but it keeps them out of the controller's cordon allowlist, so the
-    ## allowlist reads as a description of this cluster rather than of the
-    ## chart's defaults. If a future chart adds a check that emits one of these
-    ## on AMD hardware, it still cannot cordon.
-    DcgmHealth:       {taint: false}
-    GpuXid:           {taint: false}
-    GpuEcc:           {taint: false}
-    GpuBus:           {taint: false}
-    GpuPcie:          {taint: false}
-    GpuFabricMgr:     {taint: false}
-    GpuRowRemap:      {taint: false}
-    NvlinkSpeed:      {taint: false}
-    Mlx5PciPower:     {taint: false}
-    Mlx5PortModule:   {taint: false}
-    RdmaLink:         {taint: false}
-    RdmaLinkFlapping: {taint: false}
-    RdmaEffectiveBer: {taint: false}
-    RdmaModuleTemp:   {taint: false}
-    RdmaGidLayout:    {taint: false}
-    ## The vendor-neutral GpuCount condition comes from the NVIDIA check, which
-    ## does not run here; amd-GpuCount below is its counterpart.
-    GpuCount:         {taint: false}
-
-    ## The AMD conditions keep the chart's own policy, which cordons on the
-    ## hard faults (driver, ECC, PCIe, KFD, XGMI, bad pages) and reports on the
-    ## rest. amd-GpuCount is raised to cordon here: a GPU that has fallen off
-    ## the bus makes the node unfit for scheduling, exactly as on NVIDIA.
+    # >>> RENDERED from charts/trainy-remediation/policy/conditions.yaml
+    # >>> (profile: amd) by policy/render.py. Edit the policy, not
+    # >>> this block: `python3 charts/trainy-remediation/policy/render.py`.
+    #
+    # -- GPU (nvidia-smi / DCGM sensors) -------------------------------------
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU.
+    DcgmHealth:       null
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU.
+    GpuBus:           null
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU.
+    GpuXid:           null
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU.
+    GpuEcc:           null
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU.
+    GpuRowRemap:      null
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU.
+    GpuFabricMgr:     null
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU.
+    GpuPcie:          null
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU.
+    GpuCount:         null
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU.
+    NvlinkSpeed:      null
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU. It has no switch of its own (passive-node bundle);
+    # on a node with no NVIDIA GPU on the bus it skips itself and reports
+    # healthy (since #650).
+    GpuThermal:       null
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU. It has no switch of its own (passive-node bundle);
+    # on a node with no NVIDIA GPU on the bus it skips itself and reports
+    # healthy (since #650).
+    GpuPowerBrake:    null
+    # OFF in this profile: NVIDIA GPU sensor (nvidia-smi / DCGM): nothing to
+    # read on an AMD GPU. It has no switch of its own (passive-node bundle);
+    # on a node with no NVIDIA GPU on the bus it skips itself and reports
+    # healthy (since #650).
+    GpuRawTemp:       null
+    #
+    # -- NIC / RDMA (mlx5, ibstat, mlxlink) ----------------------------------
+    # An IB/RoCE port that is down and staying down (ibstat State != Active or
+    # Physical state != LinkUp). Dead NIC, bad cable or fabric config, and a
+    # reboot repairs none of those, so it escalates.
+    RdmaLink:         {taint: true}
+    # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
+    # NICs, nothing to read.
+    RdmaLinkFlapping: null
+    # Fewer in-scope RDMA devices than EXPECTED_RDMA_NIC_COUNT. A NIC has
+    # physically gone: unambiguous, not transient, and a job placed here fails
+    # its collectives.
+    RdmaNicCount:     {taint: true}
+    # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
+    # NICs, nothing to read.
+    RdmaEffectiveBer: null
+    # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
+    # NICs, nothing to read.
+    RdmaModuleTemp:   null
+    # OFF in this profile: RoCE sensor tuned on Mellanox; no measured baseline
+    # on AINIC.
+    # Its sensor still runs in this file (npd.checks.rdmaGidLayout: true): the
+    # condition is raised and alerts, but never cordons.
+    RdmaGidLayout:    null
+    # OFF in this profile: RoCE sensor tuned on Mellanox; no measured baseline
+    # on AINIC.
+    RoceMtu:          null
+    # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
+    # NICs, nothing to read.
+    Mlx5PciPower:     null
+    # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
+    # NICs, nothing to read.
+    Mlx5PortModule:   null
+    # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
+    # NICs, nothing to read.
+    Mlx5AccessReg:    null
+    # Fatal HCA lines in the kernel log. Report-only because it does not
+    # discriminate: over 30 days on a B300 cluster it was true for 129 node-
+    # hours, and in 105 of them RdmaLink was already cordoning the node.
+    # Almost all the rest was one synchronised burst across six nodes in an
+    # afternoon -- one fabric event, which a true gate would have answered by
+    # quarantining six machines at once.
+    HcaFatal:         {taint: false}
+    # RDMA error counters increasing. RDMA_COUNTER_DELTA_THRESHOLD defaults to
+    # 0, so ANY increase trips this -- a true gate at that threshold would
+    # cordon continuously. Set a real threshold before reconsidering.
+    RdmaCounters:     {taint: false}
+    # Cannot reach peers over RDMA after REACHABILITY_FAIL_STREAK consecutive
+    # rounds. Genuinely useful, but fabric-wide: one switch event trips it on
+    # every node behind that switch at the same moment.
+    # SENSOR OFF HERE (npd.checks.rdmaReachability: false): dead setting.
+    RdmaReachability: {taint: false}
+    #
+    # -- Host ----------------------------------------------------------------
+    # A physical NIC that somebody brought UP has no carrier -- a dead optic,
+    # an unseated or pulled cable, a dark switch port. No in-cluster fix, so a
+    # true gate would escalate. Report-only everywhere for now: the predicate
+    # (physical + admin-UP + no carrier) is validated against one fleet's B300
+    # hosts and no other SKU, and the cost of being wrong is a mass cordon.
+    # Flip per cluster once a fleet's healthy baseline is known to be clean,
+    # remembering the other asymmetry: a switch or optic failure that takes
+    # many ports at once cordons every node behind it.
+    NetLinkCarrier:   {taint: false}
+    # A required kernel module is not loaded. The node cannot run the workload
+    # it advertises capacity for, and no amount of retrying changes that, so
+    # quarantine it rather than letting jobs land and fail.
+    KernelModules:    {taint: true}
+    # The node cannot complete an HTTPS request to ANY configured target for
+    # most of a 10-cycle window (~10 minutes). The name says Https, not Tls,
+    # on purpose: the check fires on total unreachability at WHATEVER stage,
+    # and the stage that actually took a fleet down was TCP (SYN blackhole).
+    # Same gate as the NVIDIA standard.
+    EgressHttps:      {taint: true}
+    # A wedged NFS client hangs forever in uninterruptible (D-state) sleep: no
+    # error, no timeout, and nothing a reboot pipeline can fix when the root
+    # cause sits on the NFS server.
+    # Same gate as the NVIDIA standard.
+    # SENSOR OFF HERE (npd.checks.nfsHealth: false): dead setting.
+    NfsHealth:        {taint: true}
+    # DNS is a cluster/network fault, not a node fault: a reboot does not fix
+    # it and it hits many nodes at once. Report-only everywhere.
+    DnsResolution:    {taint: false}
+    # DNS resolution failing from inside a pod. Same call as DnsResolution: a
+    # cluster fault, it hits many nodes at once, and a reboot does not fix it.
+    # It fired on 38 distinct nodes in 30 days on one cluster, which is the
+    # shape of an outage, not of bad hardware.
+    PodNetworkDns:    {taint: false}
+    # A local NVMe/RAID mount unit has failed, or an md array is degraded. The
+    # "Ready but pods will not schedule" case. Report-only because a reboot
+    # does not remake a broken array; read as state only, since a hung mount
+    # would hang the check.
+    NvmeRaidMount:    {taint: false}
+    # Detection-only everywhere, matching its filesystem siblings: a missing
+    # mount is frequently a boot-ordering or server-side event that hits many
+    # nodes at once, where cordoning the fleet helps nobody. A site that wants
+    # parity with a Slurm HealthCheckProgram, which does drain on it, sets
+    # this true in its own file.
+    # SENSOR OFF HERE (npd.checks.mountHealth: false): dead setting.
+    MountHealth:      {taint: false}
+    # A drifted BIOS NUMA-per-socket setting (NPS/SNC) is not something a
+    # reboot changes -- a true gate would cordon and cycle the node forever.
+    # Detection-first, like PcieAcs; true escalates for a human to fix the
+    # BIOS.
+    # SENSOR OFF HERE (npd.checks.numaTopology: false): dead setting.
+    NumaTopology:     {taint: false}
+    # PCIe ACS enabled, which blocks peer-to-peer DMA between GPUs. A BIOS or
+    # boot-parameter setting: a reboot does not change it, so a true gate
+    # would cycle the node forever. Detection-first.
+    PcieAcs:          {taint: false}
+    # PCIe AER log lines. Detection-first by design.
+    PcieAer:          {taint: false}
+    #
+    # -- AMD (opt-in: npd.amd.enabled) ---------------------------------------
+    # Mirrors GpuRowRemap. Retired/pending/unreservable HBM pages are
+    # permanent memory degradation and do not un-retire. Up to
+    # AMD_BAD_PAGES_RETIRED_LIMIT retired pages per GPU is normal wear (32 on
+    # the MI355X, the provider's own RMA line); past it the node leaves
+    # service.
+    amd-GpuBadPages:  {taint: true}
+    # Fewer AMD GPUs than AMD_EXPECTED_GPU_COUNT. Mirrors GpuCount.
+    # The AMD standard cordons: a GPU that has fallen off the bus makes the
+    # node unfit for scheduling, exactly as on NVIDIA.
     amd-GpuCount:     {taint: true}
+    # amdgpu kernel faults (ring timeouts, RAS uncorrectable/poison, XGMI/WAFL
+    # PCS errors), a wedged amd-smi (DRIVER_TIMEOUT_STREAK consecutive
+    # timeouts, default 2), or -- only when a driver/ROCm pin is set -- a
+    # version mismatch. The AMD GpuXid; only errors from the last 24 hours
+    # count (#774). Know the hazard before you set the pins: a version
+    # mismatch is fleet-wide by nature, so a driver rollout that lands ahead
+    # of the pinned value cordons every AMD node at once.
+    amd-GpuDriver:    {taint: true}
+    # Uncorrectable ECC or PCIe replays, from amd-smi. Correctable ECC is
+    # ignored: AMD treats it as diagnostic only, not an RMA criterion.
+    # WARN-ONLY on the AMD standard (2026-09-28): too many false positives in
+    # the field to drain on. Bad HBM pages, the durable memory fault, still
+    # cordon through amd-GpuBadPages.
+    amd-GpuEcc:       {taint: false}
+    # Mirrors GpuPcie: a GPU linked below its own maximum width is a slot or
+    # riser fault that survives a reboot and halves host-device bandwidth.
+    # Gate width, not speed, which downshifts at idle under power management.
+    amd-GpuPcie:      {taint: true}
+    # Junction temperature at the SW capping limit on two readings in a row --
+    # the only GPU temperature alarm an AMD node has, since GpuRawTemp reads
+    # nvidia-smi.
+    # The AMD standard gives it the GpuRawTemp treatment: evict the job, hold
+    # an hour to cool, revalidate, return. Its trip point is pinned at 95C in
+    # npd.env, measured across the fleet (over a week, 800 GPUs on seven
+    # clusters never read above 88C; the card's own slowdown point is ~100C)
+    # rather than taken from the card.
+    # SENSOR OFF HERE (npd.amd.checks.gpuThermal: false): dead setting.
+    amd-GpuThermal:   {taint: true, drain: true, holdFor: 1h}
+    # Mirrors GpuBus. /dev/kfd is the interface every ROCm process opens; if
+    # it is missing or unopenable the node cannot run a single AMD workload.
+    amd-Kfd:          {taint: true}
+    # Mirrors GpuFabricMgr (not NvlinkSpeed): peers INACCESSIBLE across the
+    # XGMI fabric, not merely degraded. Such a node fails collectives for
+    # every job placed on it.
+    amd-Xgmi:         {taint: true}
+    # Never taint this one; unlike the other report-only gates that is not a
+    # tuning preference. The usual cause is the device-plugin DaemonSet
+    # restarting, which clears in seconds, but the taint remediation applies
+    # is trainy.ai/node-state, and a device plugin that does not tolerate it
+    # cannot reschedule -- so cordoning for a missing device plugin guarantees
+    # the plugin stays missing and the validation Jobs that request
+    # amd.com/gpu can never schedule to clear it.
+    amd-DevicePlugin: {taint: false}
+    # A Pensando AINIC transceiver event from the ionic driver's dmesg, the
+    # AMD NIC's Mlx5PortModule. Since 2026-09-22 the check needs TWO events on
+    # one port inside its 3h window (IONIC_KMSG_MIN_EVENTS): on a week of
+    # fleet kernel logs a one-event rule fired 471 times on 174 machines, two-
+    # on-a-port 56 on 48.
+    # WARN-ONLY on the AMD standard (2026-09-24): AMD flaps ~30x more often
+    # than NVIDIA per machine-day even under the two-event rule, and the
+    # largest AMD cluster already ran it warn-only for capacity. A cluster
+    # that opts in to cordoning gets the 45m holdAfterReboot: the sensor
+    # ignores the first 35 minutes of uptime on this fabric
+    # (IONIC_KMSG_BOOT_GRACE_MINUTES), so a shorter hold would watch nothing.
+    amd-RdmaLinkFlap: {taint: false, holdAfterReboot: 45m}
+    # ionic RoCE transport error counters (requester/responder retry and
+    # sequence faults), separate from the vendor-neutral RdmaCounters because
+    # they are transport errors, not port-level physical errors, and need
+    # their own threshold and baseline. Detection-only: they tick under
+    # ordinary congestion. Inert on a Mellanox fleet (self-skips as healthy).
+    amd-RdmaCounters: {taint: false}
