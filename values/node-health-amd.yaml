@@ -173,7 +173,7 @@ remediation:
     # NICs, nothing to read.
     RdmaModuleTemp:   null
     # OFF in this profile: RoCE sensor tuned on Mellanox; no measured baseline
-    # on AINIC.
+    # on AINIC outside Slurm yet.
     # Its sensor still runs in this file (npd.checks.rdmaGidLayout: true): the
     # condition is raised and alerts, but never cordons.
     RdmaGidLayout:    null
