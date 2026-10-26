@@ -276,14 +276,29 @@ remediation:
     # The AMD standard cordons: a GPU that has fallen off the bus makes the
     # node unfit for scheduling, exactly as on NVIDIA.
     amd-GpuCount:     {taint: true}
-    # amdgpu kernel faults (ring timeouts, RAS uncorrectable/poison, XGMI/WAFL
-    # PCS errors), a wedged amd-smi (DRIVER_TIMEOUT_STREAK consecutive
-    # timeouts, default 2), or -- only when a driver/ROCm pin is set -- a
-    # version mismatch. The AMD GpuXid; only errors from the last 24 hours
-    # count (#774). Know the hazard before you set the pins: a version
-    # mismatch is fleet-wide by nature, so a driver rollout that lands ahead
-    # of the pinned value cordons every AMD node at once.
+    # amdgpu kernel hardware faults -- the GPU rows of AMD's "recommend drain"
+    # list (Primus-SaFE sys_dmesg_311.sh: uncorrectable, poison, fatal, ACA
+    # uncorrectable), CPU MCE, XGMI/WAFL link errors, an IPC import failure
+    # (AMD's agent cordons on both), HBM page retirement, a RAS interrupt that
+    # disabled the device, a failed GPU reset -- a wedged amd-smi
+    # (DRIVER_TIMEOUT_STREAK consecutive timeouts, default 2), or -- only when
+    # a driver/ROCm pin is set -- a version mismatch. The AMD GpuXid; only
+    # errors from the last 24 hours count (#774). Hangs, resets and every
+    # other amdgpu complaint go to amd-GpuKernelWarn instead. Know the hazard
+    # before you set the pins: a version mismatch is fleet-wide by nature, so
+    # a driver rollout that lands ahead of the pinned value cordons every AMD
+    # node at once.
     amd-GpuDriver:    {taint: true}
+    # The rest of the amdgpu kernel-log scan: hangs and GPU, ring and queue
+    # resets (AMD's "investigate" tier), ring timeouts and DRM *ERROR* lines,
+    # XGMI PCS BERExceededErr (which amdgpu counts as correctable on
+    # MI300/MI355) and any other amdgpu line saying failed/error/timeout.
+    # Report-only because it cannot tell a process's fault from the
+    # hardware's: over 30 days to 2026-10-24 this part cordoned 52 times on
+    # lines a job caused (init_user_pages, ttm reservation) and never found a
+    # fault. Lines known to come from a process are left out of it too. Same
+    # 24-hour window.
+    amd-GpuKernelWarn: {taint: false}
     # Uncorrectable ECC or PCIe replays, from amd-smi. Correctable ECC is
     # ignored: AMD treats it as diagnostic only, not an RMA criterion.
     # WARN-ONLY on the AMD standard (2026-09-28): too many false positives in

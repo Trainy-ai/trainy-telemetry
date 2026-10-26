@@ -390,6 +390,9 @@ remediation:
     # OFF in this profile: AMD GPU sensor (amd-smi): nothing to read on an
     # NVIDIA GPU.
     amd-GpuDriver:    null
+    # OFF in this profile: AMD GPU sensor (amdgpu kernel log): nothing to read
+    # on an NVIDIA GPU.
+    amd-GpuKernelWarn: null
     # OFF in this profile: AMD GPU sensor (amd-smi): nothing to read on an
     # NVIDIA GPU.
     amd-GpuEcc:       null
