@@ -377,7 +377,11 @@ remediation:
     # boot-parameter setting: a reboot does not change it, so a true gate
     # would cycle the node forever. Detection-first.
     PcieAcs:          {taint: false}
-    # PCIe AER log lines. Detection-first by design.
+    # PCIe AER errors (correctable, non-fatal, fatal) from the kernel log, in
+    # every kernel wording up to Linux 7.2 (7.3 rewords the line; firmware-
+    # first reports are not read); only the last 24 hours count. Detection-
+    # first by design: correctable errors are common.
+    # SENSOR OFF HERE (npd.checks.pcieAer: false): dead setting.
     PcieAer:          {taint: false}
     #
     # -- AMD (opt-in: npd.amd.enabled) ---------------------------------------
@@ -392,7 +396,7 @@ remediation:
     amd-GpuDriver:    null
     # OFF in this profile: AMD GPU sensor (amdgpu kernel log): nothing to read
     # on an NVIDIA GPU.
-    amd-GpuKernelWarn: null
+    amd-GpuDriverWarn: null
     # OFF in this profile: AMD GPU sensor (amd-smi): nothing to read on an
     # NVIDIA GPU.
     amd-GpuEcc:       null
