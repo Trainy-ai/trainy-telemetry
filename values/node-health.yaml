@@ -328,6 +328,20 @@ remediation:
     # it advertises capacity for, and no amount of retrying changes that, so
     # quarantine it rather than letting jobs land and fail.
     KernelModules:    {taint: true}
+    # The node's Ready condition has been not-True for longer than
+    # remediation.notReadyAfter (1h): the kubelet is gone or reports itself
+    # unusable. Written by the controller, not trainy-npd -- NPD runs on the
+    # node, so it goes silent the moment the node dies -- and only on nodes
+    # trainy-npd reports on (never a control-plane or CPU node). Escalate:
+    # nothing in-cluster can run on the host, so in Provider mode the taint is
+    # the provider's request to reboot or replace it, and once the node is
+    # Ready again the condition clears and recovery validates it.
+    # The standard cordons, after 2026-10-27: a Provider-mode node sat
+    # NotReady for ~2h with its alert buried in another cluster's group, and
+    # nothing handed it to the provider until the customer asked. A node that
+    # has been dead for an hour is out of service either way; the cordon only
+    # makes it a remediation the provider acts on.
+    NodeNotReady:     {taint: true}
     # The node cannot complete an HTTPS request to ANY configured target for
     # most of a 10-cycle window (~10 minutes). The name says Https, not Tls,
     # on purpose: the check fires on total unreachability at WHATEVER stage,
