@@ -182,6 +182,12 @@ remediation:
     RoceMtu:          null
     # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
     # NICs, nothing to read.
+    NicFwConfig:      null
+    # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
+    # NICs, nothing to read.
+    NicFwConfigPending: null
+    # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
+    # NICs, nothing to read.
     Mlx5PciPower:     null
     # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
     # NICs, nothing to read.

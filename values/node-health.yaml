@@ -282,6 +282,26 @@ remediation:
     # The standard cordons; the fabric's MTU is set per cluster.
     # SENSOR OFF HERE (npd.checks.roceMtu: false): dead setting.
     RoceMtu:          {taint: true}
+    # A NIC's non-volatile firmware config (mlxconfig Current) breaks a drift
+    # rule: MAX_ACC_OUT_READ below 128 with advanced PCI settings on,
+    # PCI_WR_ORDERING=force_relax, or a BlueField in DPU mode. GPUDirect RDMA
+    # runs at a fraction of line rate and NCCL's lockstep rails drag the whole
+    # collective with it (410 vs 700 GB/s on two B200 nodes, 2026-10-30), with
+    # every link, PCIe and GPU signal healthy. Report-only until the policy is
+    # decided: the fix is the provider's (mlxconfig set plus a firmware
+    # reset), and the controller's answer to a cordon is a reboot, which
+    # applies whatever else is pending and can make the node worse. Read by
+    # mlxconfig (npd.checks.nicFwConfig), which the chart ships off.
+    # SENSOR OFF HERE (npd.checks.nicFwConfig: false): dead setting.
+    NicFwConfig:      {taint: false}
+    # A NIC's firmware config has a change queued for the next boot (mlxconfig
+    # Next Boot differs from Current): the node will behave differently after
+    # any reboot, the remediation controller's included. Seen 2026-10-30 on
+    # healthy B200 nodes queued to switch their BlueField-3 rails to DPU mode.
+    # A warning to read before rebooting, never a reason to cordon: cordoning
+    # would end in exactly the reboot that applies the change.
+    # SENSOR OFF HERE (npd.checks.nicFwConfig: false): dead setting.
+    NicFwConfigPending: {taint: false}
     # The mlx5 driver reported insufficient power on the adapter's PCIe slot.
     # The card keeps linking, degraded, until it doesn't -- a riser/PSU/slot
     # fault with no in-cluster repair, so it escalates.
