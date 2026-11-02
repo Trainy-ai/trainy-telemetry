@@ -284,14 +284,18 @@ remediation:
     RoceMtu:          {taint: true}
     # A NIC's non-volatile firmware config (mlxconfig Current) breaks a drift
     # rule: MAX_ACC_OUT_READ below 128 with advanced PCI settings on,
-    # PCI_WR_ORDERING=force_relax, or a BlueField in DPU mode. GPUDirect RDMA
-    # runs at a fraction of line rate and NCCL's lockstep rails drag the whole
-    # collective with it (410 vs 700 GB/s on two B200 nodes, 2026-10-30), with
-    # every link, PCIe and GPU signal healthy. Report-only until the policy is
-    # decided: the fix is the provider's (mlxconfig set plus a firmware
-    # reset), and the controller's answer to a cordon is a reboot, which
-    # applies whatever else is pending and can make the node worse. Read by
-    # mlxconfig (npd.checks.nicFwConfig), which the chart ships off.
+    # PCI_WR_ORDERING=force_relax, or a BlueField in DPU mode; or it differs
+    # from the cluster's declared NIC profile
+    # (npd.checks.nicFwConfig.expected, e.g. the Spectrum-X features on six of
+    # 423 B200 nodes, 2026-11-01), or the node's own rails disagree with each
+    # other. GPUDirect RDMA runs at a fraction of line rate and NCCL's
+    # lockstep rails drag the whole collective with it (410 vs 700 GB/s on two
+    # B200 nodes, 2026-10-30), with every link, PCIe and GPU signal healthy.
+    # Report-only until the policy is decided: the fix is the provider's
+    # (mlxconfig set plus a firmware reset), and the controller's answer to a
+    # cordon is a reboot, which applies whatever else is pending and can make
+    # the node worse. Read by mlxconfig (npd.checks.nicFwConfig), which the
+    # chart ships off.
     # SENSOR OFF HERE (npd.checks.nicFwConfig: false): dead setting.
     NicFwConfig:      {taint: false}
     # A NIC's firmware config has a change queued for the next boot (mlxconfig
@@ -299,7 +303,9 @@ remediation:
     # any reboot, the remediation controller's included. Seen 2026-10-30 on
     # healthy B200 nodes queued to switch their BlueField-3 rails to DPU mode.
     # A warning to read before rebooting, never a reason to cordon: cordoning
-    # would end in exactly the reboot that applies the change.
+    # would end in exactly the reboot that applies the change. NPD cannot see
+    # the fleet, so a fleet-wide rollout fires on every node; read
+    # trainy_nic_fw_config_pending_info centrally to tell it from an outlier.
     # SENSOR OFF HERE (npd.checks.nicFwConfig: false): dead setting.
     NicFwConfigPending: {taint: false}
     # The mlx5 driver reported insufficient power on the adapter's PCIe slot.
@@ -443,6 +449,9 @@ remediation:
     # OFF in this profile: AMD GPU sensor (amd-smi): nothing to read on an
     # NVIDIA GPU.
     amd-Kfd:          null
+    # OFF in this profile: AMD GPU sensor (amdkfd task stacks): nothing to
+    # read on an NVIDIA GPU.
+    amd-KfdDeadlock:  null
     # OFF in this profile: AMD GPU sensor (amd-smi): nothing to read on an
     # NVIDIA GPU.
     amd-Xgmi:         null

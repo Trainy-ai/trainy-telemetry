@@ -343,6 +343,11 @@ remediation:
     # Mirrors GpuBus. /dev/kfd is the interface every ROCm process opens; if
     # it is missing or unopenable the node cannot run a single AMD workload.
     amd-Kfd:          {taint: true}
+    # The amdkfd profiler-lock / queue-lock deadlock in ROCm 7.2's amdgpu-dkms
+    # (a driver bug, not a hardware fault). Every ROCm process on the node
+    # hangs, so its jobs are already dead, and the GPUs stay unusable until a
+    # hard reset.
+    amd-KfdDeadlock:  {taint: true}
     # Mirrors GpuFabricMgr (not NvlinkSpeed): peers INACCESSIBLE across the
     # XGMI fabric, not merely degraded. Such a node fails collectives for
     # every job placed on it.
