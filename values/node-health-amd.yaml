@@ -248,9 +248,15 @@ remediation:
     # A wedged NFS client hangs forever in uninterruptible (D-state) sleep: no
     # error, no timeout, and nothing a reboot pipeline can fix when the root
     # cause sits on the NFS server.
-    # Same gate as the NVIDIA standard.
+    # Warn-only on AMD, on the standard and beside Slurm (decided 2026-11-03).
+    # Every AMD cluster mounts the same provider NFS server, so a stall there
+    # is fleet-wide by construction: on 2026-11-02 16:20-16:28Z one 8-minute
+    # server stall raised this on 31 AMD nodes in two clusters, the cordons
+    # repaired nothing, and the provider's scheduler evicted every job on a
+    # cordoned node. The sensor is not switched off here, so where it runs the
+    # stall stays visible.
     # SENSOR OFF HERE (npd.checks.nfsHealth: false): dead setting.
-    NfsHealth:        {taint: true}
+    NfsHealth:        {taint: false}
     # DNS is a cluster/network fault, not a node fault: a reboot does not fix
     # it and it hits many nodes at once. Report-only everywhere.
     DnsResolution:    {taint: false}
