@@ -266,6 +266,17 @@ remediation:
     # that keeps tripping after the hold is the signal to take this back off.
     # SENSOR OFF HERE (npd.checks.mlxlinkPhy: false): dead setting.
     RdmaModuleTemp:   {taint: true, drain: true, holdFor: 1h}
+    # WHY a rail is down, as a provider-ticket line: the optic's per-lane
+    # Rx/Tx light, module and DataPath state, firmware status opcode, part
+    # number and PCI address from the same mlxlink sweep, classified as
+    # optic_tx_dead (local module never lit its transmitter), no_rx_light
+    # (nothing from the switch side), optic_dark, link_up_phy_not_trained
+    # (kernel carrier without a trained speed) or optics_ok_link_down. Report-
+    # only: it names the part to reseat or the side to check, and leaves the
+    # cordon to RdmaLink wherever RdmaLink cordons (not on a cluster that
+    # overrides RdmaLink to report-only). Read by mlxlink.
+    # SENSOR OFF HERE (npd.checks.mlxlinkPhy: false): dead setting.
+    RdmaOpticFault:   {taint: false}
     # A link flap rebuilt a RoCE port's GID table with a hole, so the routable
     # v2 GID moved (e.g. index 3 -> 4). The port is not broken -- the node
     # runs collectives at full bandwidth under GID auto-detection -- but

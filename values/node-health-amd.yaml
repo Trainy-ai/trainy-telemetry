@@ -172,6 +172,9 @@ remediation:
     # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
     # NICs, nothing to read.
     RdmaModuleTemp:   null
+    # OFF in this profile: Mellanox NIC sensor: AMD clusters run AMD AINIC
+    # NICs, nothing to read.
+    RdmaOpticFault:   null
     # OFF in this profile: RoCE sensor tuned on Mellanox; no measured baseline
     # on AINIC outside Slurm yet.
     # Its sensor still runs in this file (npd.checks.rdmaGidLayout: true): the
