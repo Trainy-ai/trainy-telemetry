@@ -350,6 +350,27 @@ remediation:
     # every node behind that switch at the same moment.
     # SENSOR OFF HERE (npd.checks.rdmaReachability: false): dead setting.
     RdmaReachability: {taint: false}
+    # This node's probe mesh has lost every scored peer on one rail (at least
+    # 3 of them) for 5 minutes while another rail on the node is healthy: the
+    # "all probes on one local NIC failing to all peers" branch of the mesh
+    # design's triage, a dead NIC, optic, cable or switch port on this node.
+    # Three dead rails a tenant confirmed with its own RDMA write test
+    # (2026-10/11) read exactly like this in the mesh metrics for each VM's
+    # whole life, and nothing turned them into a condition. The sidecar
+    # computes the verdict (trainy_rdma_mesh_rail_fault) and the plugin reads
+    # it off localhost; 72h of fleet data (2026-11-05) put every real single-
+    # rail fault at 2-46 hours and every shorter blip on all rails of one node
+    # at once, which the verdict discards, so 5 minutes drops nothing real.
+    # Cordons behind the cluster-wide gate (2026-11-05): a node waits 30
+    # minutes in service, and if fewer than the threshold of nodes (3, or 10%
+    # of the nodes running the sensor on a bigger cluster) raised it in that
+    # time, it is this node's NIC, optic, cable or switch port and the node is
+    # cordoned; the threshold or more at once is the rail or the fabric, and
+    # every one of them is held in service with the warning up. 30 minutes
+    # covers the widest cluster-wide onset seen in the fleet (19 minutes on
+    # 2026-11-03), and the gate counts nodes still True, so a latecomer is
+    # held while the others stay dark.
+    RdmaMeshFault:    {taint: true, clusterWide: {minNodes: 3, minFraction: 0.1, within: 30m}}
     #
     # -- Host ----------------------------------------------------------------
     # A physical NIC that somebody brought UP has no carrier -- a dead optic,
@@ -389,6 +410,20 @@ remediation:
     # answer is a per-cluster override, announced by Step 10 -- not a comment
     # describing a setting this file does not make.
     EgressHttps:      {taint: true}
+    # Two or more DIFFERENT programs faulted (segfault, general protection
+    # fault, trap) on this node inside an hour, ten or more faults in all. One
+    # program crashing is a bug; a Go daemon and a GPU library dying 200 times
+    # in 20 minutes on one VM and nowhere else (2026-10-31) is the only
+    # passive sign of bad host memory a VM ever gets, since the hypervisor
+    # keeps the MCEs. Counts process names, never libraries, so one program
+    # crash-looping in three libraries stays quiet. Fleet-wide, seven nodes
+    # logged exactly one crash in a week with nothing else wrong, which is why
+    # a single crash never counts.
+    # Report-only everywhere: a corrupt image or a driver/library mismatch on
+    # one node produces the identical kernel lines. The condition is the
+    # trigger for a memory test on the node, not the verdict.
+    # SENSOR OFF HERE (npd.checks.crashBurst: false): dead setting.
+    CrashBurst:       {taint: false}
     # A wedged NFS client hangs forever in uninterruptible (D-state) sleep: no
     # error, no timeout, and nothing a reboot pipeline can fix when the root
     # cause sits on the NFS server.
