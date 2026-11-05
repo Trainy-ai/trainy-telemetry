@@ -395,9 +395,14 @@ remediation:
     # The standard cordons, after 2026-09-07: two nodes wedged on node-local
     # storage-path faults (a dead NIC optic, reversed cabling), so the fault
     # was per-node and a cordon was exactly right -- jobs kept landing on
-    # nodes where every read hung. Added to both standards 2026-08-28.
+    # nodes where every read hung. Added to both standards 2026-08-28. Behind
+    # the cluster-wide gate since 2026-11-03: a node is cordoned only if it
+    # has been stuck 5 minutes and fewer than 3 nodes (10% of the nodes
+    # running the sensor on a bigger cluster) were stuck at any point in those
+    # 5 minutes -- the 2026-11-02 stall cordoned 31 nodes across two clusters
+    # for a fault none of them had.
     # SENSOR OFF HERE (npd.checks.nfsHealth: false): dead setting.
-    NfsHealth:        {taint: true}
+    NfsHealth:        {taint: true, clusterWide: {minNodes: 3, minFraction: 0.1, within: 5m}}
     # DNS is a cluster/network fault, not a node fault: a reboot does not fix
     # it and it hits many nodes at once. Report-only everywhere.
     DnsResolution:    {taint: false}
