@@ -314,6 +314,13 @@ remediation:
     # BIOS.
     # SENSOR OFF HERE (npd.checks.numaTopology: false): dead setting.
     NumaTopology:     {taint: false}
+    # An NVMe drive, NIC or GPU trained its PCIe link narrower (or, for NVMe
+    # and NICs, slower) than its slot allows: a half-seated or dirty
+    # connector, a bad riser or backplane lane. The device works at a fraction
+    # of its bandwidth (one x2-of-x4 drive held a B200 scratch RAID0 at 50.6
+    # vs 58.5 GB/s, 2026-11-11). Report-only: the fix is a reseat or a part
+    # swap, which no reboot does.
+    PcieLink:         {taint: false}
     # PCIe ACS enabled, which blocks peer-to-peer DMA between GPUs. A BIOS or
     # boot-parameter setting: a reboot does not change it, so a true gate
     # would cycle the node forever. Detection-first.
