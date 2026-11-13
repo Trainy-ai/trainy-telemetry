@@ -406,10 +406,18 @@ remediation:
     # and the stage that actually took a fleet down was TCP (SYN blackhole).
     # CORDONS ON EVERY STANDARD CLUSTER since 2026-09-15: a node that cannot
     # reach anything over HTTPS cannot pull images or write checkpoints, so
-    # keeping work off it is worth the cost. If the 87-node shape recurs, the
-    # answer is a per-cluster override, announced by Step 10 -- not a comment
-    # describing a setting this file does not make.
-    EgressHttps:      {taint: true}
+    # keeping work off it is worth the cost. Behind the cluster-wide gate
+    # since 2026-11-09, the NfsHealth rule: a lone node dark for 5 minutes is
+    # cordoned; 3 or more nodes (10% of the nodes running the sensor on a
+    # bigger cluster) dark at any point in those 5 minutes are held in service
+    # with the condition and its alert still raised. That is the 87-node
+    # shape: an egress outage is the provider's NAT, not the node. On
+    # 2026-11-09 a one-hour provider outage raised this on every node of 12
+    # clusters at once (the conditions could only land when the network came
+    # back), ~73 nodes were cordoned for a fault that was already gone, the
+    # provider rebooted them all, and one tenant lost every GPU node it had.
+    # Same shape on 2026-10-15.
+    EgressHttps:      {taint: true, clusterWide: {minNodes: 3, minFraction: 0.1, within: 5m}}
     # Two or more DIFFERENT programs faulted (segfault, general protection
     # fault, trap) on this node inside an hour, ten or more faults in all. One
     # program crashing is a bug; a Go daemon and a GPU library dying 200 times
