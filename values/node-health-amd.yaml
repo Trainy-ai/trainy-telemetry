@@ -261,7 +261,7 @@ remediation:
     # on purpose: the check fires on total unreachability at WHATEVER stage,
     # and the stage that actually took a fleet down was TCP (SYN blackhole).
     # Same gate as the NVIDIA standard, cluster-wide gate included.
-    EgressHttps:      {taint: true, clusterWide: {minNodes: 3, minFraction: 0.1, within: 5m}}
+    EgressHttps:      {taint: true, clusterWide: {minNodes: 3, minFraction: 0.1, dwell: 5m, window: 10m}}
     # Two or more DIFFERENT programs faulted (segfault, general protection
     # fault, trap) on this node inside an hour, ten or more faults in all. One
     # program crashing is a bug; a Go daemon and a GPU library dying 200 times
