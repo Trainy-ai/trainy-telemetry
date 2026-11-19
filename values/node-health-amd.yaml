@@ -335,9 +335,11 @@ remediation:
     # -- AMD (opt-in: npd.amd.enabled) ---------------------------------------
     # Mirrors GpuRowRemap. Retired/pending/unreservable HBM pages are
     # permanent memory degradation and do not un-retire. Up to
-    # AMD_BAD_PAGES_RETIRED_LIMIT retired pages per GPU is normal wear (32 on
-    # the MI355X, the provider's own RMA line); past it the node leaves
-    # service.
+    # AMD_BAD_PAGES_RETIRED_LIMIT retired pages per GPU is normal wear (128 on
+    # the MI355X since 2026-11-19, 32 before); past it the node leaves
+    # service. The limit is for pages already retired: a page retired NOW is a
+    # new uncorrectable error, and amd-GpuDriver cordons on its kernel line
+    # for 24 h whatever the count.
     amd-GpuBadPages:  {taint: true}
     # Fewer AMD GPUs than AMD_EXPECTED_GPU_COUNT. Mirrors GpuCount.
     # The AMD standard cordons: a GPU that has fallen off the bus makes the

@@ -602,8 +602,15 @@ if is_true "$INSTALL_NODE_HEALTH"; then
         echo "    ${_nh_default_key}: null"
       fi
     done
-    if [[ -n "$RDMA_INTERFACES" || -n "$IB_EXPECTED_ACTIVE_PORTS" ]]; then
+    # This overlay is applied last and Helm replaces npd.env wholesale, so
+    # the AMD retired-page limit (values-amp-amd.yaml's) is set here too;
+    # left unset, the check's default of 0 cordons on the first retired page.
+    if [[ -n "$RDMA_INTERFACES" || -n "$IB_EXPECTED_ACTIVE_PORTS" || "$GPU_VENDOR" == "amd" ]]; then
       echo "  env:"
+      if [[ "$GPU_VENDOR" == "amd" ]]; then
+        echo "    - name: AMD_BAD_PAGES_RETIRED_LIMIT"
+        echo "      value: \"128\""
+      fi
       if [[ -n "$RDMA_INTERFACES" ]]; then
         echo "    - name: RDMA_INTERFACES"
         echo "      value: \"$RDMA_INTERFACES\""
