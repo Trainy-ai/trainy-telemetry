@@ -232,8 +232,25 @@ remediation:
     # An external power-brake assertion halves GPU clocks and points at power
     # delivery (PSU/PDU/rail), not at cooling. The repair is an electrical
     # inspection.
-    # The standard cordons: the repair needs hands, so hold the node.
-    GpuPowerBrake:    {taint: true}
+    # The standard cordons a brake that STAYS on: the repair needs hands, so
+    # hold the node. Two waits come first (2026-11-23). The sensor's DWELL: it
+    # raises the condition only once it has seen the brake asserted at every
+    # reading for 3 minutes (GPU_POWER_BRAKE_DWELL_SEC), because a brake is
+    # either over in seconds or on for hours and nothing in between. The
+    # server asserts it to protect its power supply (a supply failing over, a
+    # sag on the feed, a GPU's momentary spike past its rating); the GPUs run
+    # slow while it lasts and nothing is corrupted. On one H100 cluster over
+    # 14 days it was asserted 28 times: 25 for under a minute and 3 for hours.
+    # Raised on the first reading, every blip cordoned its node, and one node
+    # lost about a day of service to three of them. Then the POW, 5 minutes
+    # behind the cluster-wide gate: with the condition on, the controller
+    # watches whether other nodes raise it too. A node alone is cordoned at
+    # the end of it, 8 minutes after the sensor first saw its brake; with 3
+    # nodes or 10% of the cluster braked inside those 5 minutes it is the
+    # building's power, not a node's, and they stay in service with the
+    # condition showing. A single site power event once braked 22 of 23 nodes
+    # within a minute and cordoned every one.
+    GpuPowerBrake:    {taint: true, clusterWide: {minNodes: 3, minFraction: 0.1, within: 5m}}
     # Absolute GPU temperature ceiling (GPU_RAW_TEMP_MAX_C, default 83C), read
     # while the GPU is still climbing -- unlike GpuThermal, which by
     # construction cannot fire until the hardware is ALREADY capping clocks at
