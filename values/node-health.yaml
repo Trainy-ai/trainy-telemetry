@@ -72,6 +72,20 @@ npd:
     podNetworkDns:
       enabled: true
       namespace: kube-system
+    ## GpuCountWarn's fix: the controller deletes the device-plugin pod on a
+    ## node once per incident, and the chart grants it `delete` on pods in this
+    ## namespace. On wherever the sensor is on; `namespaces: []` in a cluster's
+    ## own values turns it off. Where this namespace does not exist, set BOTH
+    ## lists below to [] (a Role in a missing namespace fails the Helm
+    ## release, and the exporter list renders one too).
+    gpuCountWarn:
+      restartDevicePlugin:
+        namespaces: [gpu-operator]
+      ## The same for the metrics exporter: the sensor reads the exporter pod
+      ## on its node here, and the controller restarts it once when it reports
+      ## fewer GPUs than the node has. `namespaces: []` turns that off alone.
+      restartExporter:
+        namespaces: [gpu-operator]
     ## Outbound HTTPS reachability. Catches a NAT or egress path failing for a
     ## subset of nodes, which otherwise shows up as unexplained image-pull and
     ## checkpoint-upload failures.
@@ -479,6 +493,17 @@ remediation:
     # vs 58.5 GB/s, 2026-11-11). Report-only: the fix is a reseat or a part
     # swap, which no reboot does.
     PcieLink:         {taint: false}
+    # The driver sees every GPU and something above it reports fewer, on a
+    # Ready node for 10 minutes: the node offers fewer (the device plugin is
+    # withholding a GPU it marked unhealthy, or is not registered), or the
+    # metrics exporter reports fewer. Restarting that pod brings the count
+    # back with no reboot, which is why this is a warning and not GpuCount (a
+    # GPU the driver lost; when the driver count is short this one stays
+    # quiet). One node sat four days at capacity 8, allocatable 7 after a
+    # single XID, 2026-11. Never taint this one: it reports GPUs Kubernetes
+    # already withholds, or an exporter that jobs do not depend on, while the
+    # node's GPUs still work.
+    GpuCountWarn:     {taint: false}
     # PCIe ACS enabled, which blocks peer-to-peer DMA between GPUs. A BIOS or
     # boot-parameter setting: a reboot does not change it, so a true gate
     # would cycle the node forever. Detection-first.
