@@ -256,9 +256,12 @@ remediation:
     # remembering the other asymmetry: a switch or optic failure that takes
     # many ports at once cordons every node behind it.
     NetLinkCarrier:   {taint: false}
-    # A required kernel module is not loaded. The node cannot run the workload
-    # it advertises capacity for, and no amount of retrying changes that, so
-    # quarantine it rather than letting jobs land and fail.
+    # A required kernel module is not loaded, or a module pinned as
+    # name=X[.Y[.Z]] in REQUIRED_KERNEL_MODULES is loaded at another version
+    # (e.g. nvidia=590 on a node still running 580 after a reimage). The node
+    # cannot run the workload it advertises capacity for, and no amount of
+    # retrying changes that, so quarantine it rather than letting jobs land
+    # and fail.
     KernelModules:    {taint: true}
     # The node's Ready condition has been not-True for longer than
     # remediation.notReadyAfter (1h): the kubelet is gone or reports itself
